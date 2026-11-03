@@ -31,3 +31,9 @@ limitations instead of silently degrading a control.
 
 Describe the problem, the intended behavior, the affected operating systems
 and agents, and validation evidence. Keep public documentation in English;
+
+GitHub runs `Validate repository` for pull requests and pushes to `main`. Its
+`Windows validation` job validates configuration, behavioral parity, whitespace,
+and release packaging. Its `Unix shell validation` job checks the shipped Unix
+and Falcon RTR shell scripts. These jobs use read-only repository permissions
+and do not deploy to endpoints.

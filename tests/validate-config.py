@@ -2176,6 +2176,19 @@ if check(os.path.isfile(os.path.join(ROOT, UNIX_DETECTOR)), "exists: %s" % UNIX_
     for _term in ("--machine-detector", "--output-mode", "Python 3 is required"):
         check(_term in _unix_detector, "  Unix managed detector contains %s" % _term)
 
+GITHUB_WORKFLOW = ".github/workflows/validate.yml"
+if check(os.path.isfile(os.path.join(ROOT, GITHUB_WORKFLOW)), "exists: %s" % GITHUB_WORKFLOW):
+    _workflow = read(GITHUB_WORKFLOW)
+    for _term in ("pull_request:", "push:", "contents: read", "persist-credentials: false",
+                  "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+                  "python tests\\validate-config.py", "python tests\\parity-behavior.py",
+                  "bash -n scripts/unix/deploy.sh"):
+        check(_term in _workflow, "  GitHub validation workflow contains %s" % _term)
+check(os.path.isfile(os.path.join(ROOT, ".github", "dependabot.yml")),
+      "exists: .github/dependabot.yml")
+check(os.path.isfile(os.path.join(ROOT, ".github", "CODEOWNERS")),
+      "exists: .github/CODEOWNERS")
+
 install_req = ps_array(read("install.ps1"), "required")
 if install_req is not None:
     same = norm(install_req) == norm(deploy_req)

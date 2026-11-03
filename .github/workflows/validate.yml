@@ -1,0 +1,57 @@
+name: Validate repository
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows validation
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Validate configuration and parity
+        shell: pwsh
+        run: |
+          python tests\validate-config.py
+          python tests\parity-behavior.py
+          git diff --check
+      - name: Build release artifacts
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
+            -OutDir .\dist -Force -IncludeShell -IncludeFalconTemplates -IncludeGpo
+
+  unix:
+    name: Unix shell validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          bash -n scripts/unix/install.sh
+          bash -n scripts/unix/deploy.sh
+          bash -n scripts/unix/Test-AgentShieldManaged.sh
+          bash -n integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh
+          bash -n integrations/falcon-rtr/rtr-scripts/AgentShield-Cleanup-Unix.sh
+          git diff --check

@@ -1,0 +1,46 @@
+name: Bug report
+description: Report incorrect behavior in an AgentShield policy, installer, validator, or integration.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, personal data, customer names, host identifiers, or production logs.
+        Report suspected vulnerabilities privately as described in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: AgentShield version or commit
+      placeholder: v1.0.3 or e631bdd
+    validations:
+      required: true
+  - type: checkboxes
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - label: Windows
+        - label: Linux
+        - label: macOS
+        - label: Windows with WSL
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized output
+      description: Redact paths, user names, identifiers, and all sensitive values.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Provide only safe commands and sanitized configuration.
+    validations:
+      required: true
