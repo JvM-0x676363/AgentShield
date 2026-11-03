@@ -1,8 +1,7 @@
 # Falcon RTR workflow template
 
-`agentshield-deploy.workflow.template.yaml` is a starting point for a
-CrowdStrike Falcon Fusion Workflow that deploys the AgentShield Windows
-package through Real Time Response (RTR).
+This directory contains CrowdStrike Falcon Fusion Workflow templates for
+AgentShield deployment through Real Time Response (RTR).
 
 It is deliberately not ready to target a production fleet. Before import,
 replace the host-group placeholder and confirm the generic action identifiers
@@ -10,20 +9,30 @@ against the Falcon action catalog available to your tenant. Do not copy host
 groups, schedules, custom scripts, log destinations, or credentials from
 another workflow.
 
+| Workflow template | Mock data | Platform | Validation status |
+|---|---|---|---|
+| `agentshield-deploy.workflow.template.yaml` | `agentshield-deploy-windows.mocks.template.json` | Windows | Imported and mock-tested in a pilot tenant. The `Put file` action was also tested on one pilot endpoint. |
+| `agentshield-deploy-linux.workflow.template.yaml` | `agentshield-deploy-linux.mocks.template.json` | Linux | Imported and success-path mock-tested. Validate a real pilot endpoint and host prerequisites before rollout. |
+| `agentshield-deploy-macos.workflow.template.yaml` | `agentshield-deploy-macos.mocks.template.json` | macOS | Imported and success-path mock-tested. Validate a real pilot endpoint and host prerequisites before rollout. |
+
 ## What the template does
 
-For each online Windows sensor selected by your host group, the workflow:
+Each template filters the selected host group to its declared platform, then:
 
-1. uploads `agent-shield.zip` from the Falcon file library to
-   `C:\Windows\Temp`;
-2. extracts the package and runs the fast configuration-only pass:
-   `deploy.ps1 -Force -SkipTools -SkipVSCode -OutputMode Quiet`;
-3. runs `Test-AgentShieldManaged.ps1` to validate machine-managed controls;
+1. uploads `agent-shield.zip` from the Falcon file library to the platform
+   staging directory (`C:\Windows\Temp` on Windows and `/var/tmp` on Unix);
+2. extracts the package and runs the fast configuration-only pass;
+3. runs the platform-appropriate managed-control verification;
 4. writes structured RTR output to the workflow log for either outcome.
 
 It does not download scanners, deploy VS Code extensions, reboot hosts, remove
 them from groups, or delete the staged package. A failed endpoint keeps its
 local transcript available for an authorized operator to retrieve and review.
+
+The Unix templates require `/bin/bash`, `unzip`, and `python3` on the endpoint.
+They use `deploy.sh` and `Test-AgentShieldManaged.sh`, which are included only
+when the ZIP is built with `-IncludeShell`. The Unix detector uses the bundled
+verifier and requires Python 3 on the endpoint.
 
 ## Prepare the package
 
@@ -31,12 +40,16 @@ Build the artifact from a reviewed source checkout:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
-  -OutDir .\dist -Force -IncludeShell -IncludeGpo
+  -OutDir .\dist -Force -IncludeShell -IncludeFalconTemplates
 ```
 
 Upload the resulting `dist\agent-shield.zip` to the Falcon file library with
 the exact name `agent-shield.zip`. Record the SHA-256 printed by the build and
 verify it before upload using your approved operational process.
+
+The same command produces `dist\agent-shield-integrations.zip`. Extract that
+archive only on the operator workstation and import the appropriate workflow
+from `falcon-rtr/`; do not transfer this integration archive to endpoints.
 
 ## Configure and import
 
@@ -67,17 +80,33 @@ paths:
 
 | Path | Required simulated output | Expected route |
 |---|---|---|
-| Success | `DeviceQuery` returns one synthetic device; `GetDeviceDetails` identifies Windows; deployment stdout contains `"status":"success"`; detector stdout contains `"compliant":true` | `WriteSuccessLog` |
+| Success | `DeviceQuery` returns one synthetic device; `GetDeviceDetails` identifies the template platform; deployment stdout contains `"status":"success"`; verification stdout contains the template's expected success value | `WriteSuccessLog` |
 | Failure | Deployment stdout omits `"status":"success"`, or detector stdout omits `"compliant":true` | `WriteFailureLog` |
+
+Each `*.mocks.template.json` file contains sanitized success data and scenario
+overrides for that workflow. Falcon does not import node mocks with the YAML:
+copy the values into the matching nodes in the Test view and apply an override
+for each failure branch. The files contain fictitious device values and must
+remain tenant-neutral.
 
 Do not store mock exports from production executions in this repository. Falcon
 can export node mocks inline, but their `output_data` is tenant-specific and
 may include host or operational data. Keep mock definitions in the Falcon test
 workspace or a separately approved internal repository.
 
-After both mock paths pass, switch only the RTR actions to live mode and run
-the workflow against the dedicated pilot group. The live pilot is the first
-test that can upload a file or execute the deployment command.
+The tested Windows workflow also confirmed that Falcon conditions need the
+leading wildcard inside the quoted value. For example, the success condition is
+stored as `*'*\"status\":\"success\"*'`; omitting that inner wildcard changes
+the comparison to a prefix match and routes a valid JSON result to failure.
+
+Testing an individual `Put file` or `Run file` action in the Falcon UI can run
+the action against the selected endpoint, even when the overall workflow is in
+test mode or disabled. Treat individual-action tests as live endpoint changes.
+
+After mock validation, switch only the RTR actions to live mode and run the
+workflow against the dedicated pilot group. The live pilot is the first test
+that can upload a file or execute the deployment command. Confirm `/bin/bash`,
+`unzip`, and Python 3 on Unix endpoints before a Linux or macOS live pilot.
 
 ## Rollout guidance
 

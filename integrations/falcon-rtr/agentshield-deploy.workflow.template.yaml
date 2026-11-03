@@ -13,7 +13,7 @@
 # This file intentionally contains no organization identifiers, schedules,
 # credentials, custom Falcon scripts, or automatic host-removal actions.
 
-name: AgentShield deployment - RTR template
+name: '[Windows] AgentShield deployment - RTR template'
 trigger:
   next:
     - DeviceQuery
@@ -148,27 +148,27 @@ loops:
       deployment_succeeded:
         next:
           - RunManagedDetector
-        expression: "RunAgentShieldDeployment.stdout:*'\"status\":\"success\"*'"
+        expression: "RunAgentShieldDeployment.stdout:*'*\"status\":\"success\"*'"
         display:
           - Deployment JSON result has status success
 
       deployment_failed:
         next:
           - WriteFailureLog
-        expression: "RunAgentShieldDeployment.stdout:!*'\"status\":\"success\"*'"
+        expression: "RunAgentShieldDeployment.stdout:*!'*\"status\":\"success\"*'"
         display:
           - Deployment JSON result does not have status success
 
       managed_controls_compliant:
         next:
           - WriteSuccessLog
-        expression: "RunManagedDetector.stdout:*'\"compliant\":true*'"
+        expression: "RunManagedDetector.stdout:*'*\"compliant\":true*'"
         display:
           - Managed-control detector reports compliant true
 
       managed_controls_not_compliant:
         next:
           - WriteFailureLog
-        expression: "RunManagedDetector.stdout:!*'\"compliant\":true*'"
+        expression: "RunManagedDetector.stdout:*!'*\"compliant\":true*'"
         display:
           - Managed-control detector does not report compliant true

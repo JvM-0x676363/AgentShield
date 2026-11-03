@@ -59,3 +59,15 @@ agent-shield/
 
 For deployment commands and post-install verification, see
 [OPERATIONS.md](OPERATIONS.md).
+
+## Distribution artifacts
+
+`scripts/windows/build-package.ps1` creates a deployment archive named
+`agent-shield.zip`. It contains only endpoint runtime payloads and is the file
+transferred by MDM or RTR. `-IncludeShell` adds the Linux/macOS runtime to that
+same deployment archive.
+
+`-IncludeFalconTemplates` and `-IncludeGpo` create a separate
+`agent-shield-integrations.zip`. It contains operator-side workflow templates
+with sanitized mock fixtures and/or GPO files and must not be staged on an
+endpoint.

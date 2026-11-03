@@ -536,7 +536,10 @@ declare -a TARGET_HOMES=()
 declare -a SKIP_USERS=()
 
 while IFS=: read -r username home; do
-    mapfile -t detection < <(detect_user "$username" "$home")
+    detection=()
+    while IFS= read -r detection_line; do
+        detection+=("$detection_line")
+    done < <(detect_user "$username" "$home")
     local_score="${detection[0]}"
     evidence=("${detection[@]:1}")
 

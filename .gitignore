@@ -24,6 +24,7 @@ scratch/
 # Local vendor exports and tenant-specific workflow examples are reference
 # material only. Publish reusable templates from integrations/ instead.
 tmp/
+integrations/falcon-rtr/agentshield-rtr-testado/
 
 # Artifact from build-package.ps1
 *.zip

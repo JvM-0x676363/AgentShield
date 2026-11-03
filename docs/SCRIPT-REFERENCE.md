@@ -12,9 +12,29 @@ entrypoints to its root for MDM and RTR execution.
 | `scripts/unix/install.sh` | Linux/macOS | Calling user | An interactive developer configures one workstation profile. |
 | `scripts/windows/deploy.ps1` | Windows | Machine and eligible user profiles | Intune, Falcon RTR, SCCM, or a local administrator configures a fleet endpoint. |
 | `scripts/unix/deploy.sh` | Linux/macOS | Machine and eligible user profiles | MDM, SSH, cron, or root configures a fleet endpoint. |
+| `scripts/unix/Test-AgentShieldManaged.sh` | Linux/macOS | Machine managed controls | MDM or RTR validates the Unix managed layer without inspecting user profiles. |
 
 Do not use `install.ps1` from SYSTEM. Use `deploy.ps1 -Force` for SYSTEM,
 Intune, Falcon RTR, and other non-interactive Windows sessions.
+
+## Package build
+
+`build-package.ps1` always creates `agent-shield.zip`, the endpoint deployment
+payload. Optional integration flags produce a second archive named
+`agent-shield-integrations.zip`; it is for operator-side import or distribution,
+not endpoint staging.
+
+| Switch | Archive | Contents |
+|---|---|---|
+| None | `agent-shield.zip` | Windows deployment runtime. |
+| `-IncludeShell` | `agent-shield.zip` | Adds Linux/macOS runtime and managed detector. |
+| `-IncludeFalconTemplates` | `agent-shield-integrations.zip` | Falcon Fusion workflow templates, sanitized mock fixtures, and guide. |
+| `-IncludeGpo` | `agent-shield-integrations.zip` | VS Code GPO scripts, policy, and guide. |
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
+  -OutDir .\dist -Force -IncludeShell -IncludeFalconTemplates
+```
 
 ## Shared arguments
 
@@ -79,12 +99,16 @@ on Windows and `/var/log/agentshield/agent-shield-deploy.log` on Linux/macOS.
 
 ## Verification
 
-`Test-AgentShieldManaged.ps1` is the Windows native detector for Intune. It
-checks machine-managed enforcement only and exits `0` when compliant.
+`Test-AgentShieldManaged.ps1` and `Test-AgentShieldManaged.sh` are the
+platform-native managed-layer detectors. They check machine-managed enforcement
+only, emit one structured result, and exit `0` when compliant.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\Test-AgentShieldManaged.ps1
-python3 tests/verify-install.py --expect-managed --output-mode Quiet
+```
+
+```bash
+bash ./scripts/unix/Test-AgentShieldManaged.sh --output-mode Quiet
 ```
 
 On Linux/macOS, use the Python verifier with the profile to inspect:

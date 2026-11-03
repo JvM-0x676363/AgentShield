@@ -5,8 +5,8 @@
 In a source checkout, entry points are under `scripts/windows/` and
 `scripts/unix/`. `scripts/windows/build-package.ps1` produces an operational
 ZIP with `install.ps1`, `deploy.ps1`, `install.sh`, `deploy.sh`, and
-`Test-AgentShieldManaged.ps1` at its root, so MDM and RTR commands remain
-short.
+`Test-AgentShieldManaged.ps1` at its root. With `-IncludeShell`, it also adds
+`Test-AgentShieldManaged.sh`, so MDM and RTR commands remain short.
 
 | Scenario | Windows | Linux/macOS |
 |---|---|---|
@@ -103,9 +103,10 @@ phases are `user_configuration`, `security_tools`, and `git_hooks`.
 
 ## Microsoft Intune
 
-Build the operational ZIP from the source checkout, then package its extracted
-contents as the Win32 app. The archive preserves `targets/`, `policy/`, `lib/`,
-and `hooks/`, while exposing the runnable Windows files at its root:
+Build the deployment ZIP from the source checkout, then package its extracted
+contents as the Win32 app. The deployment archive preserves only runtime
+payloads (`targets/`, `policy/`, `lib/`, and `hooks/`) while exposing the
+runnable Windows files at its root:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 -OutDir .\dist -Force
@@ -135,13 +136,16 @@ Json`, collect the final result, and retrieve the transcript only when the
 result requires investigation. The deployment script is designed for SYSTEM
 context; do not use `install.ps1` there.
 
-A generic Falcon Fusion Workflow starting point is available in
-[`integrations/falcon-rtr`](../integrations/falcon-rtr/). It stages the release
-ZIP, performs the configuration-only pass, runs the managed-layer detector,
-and records structured outcomes. It intentionally contains no host-group ID,
+Falcon Fusion Workflow starting points are available in
+[`integrations/falcon-rtr`](../integrations/falcon-rtr/). They stage the release
+ZIP, perform the configuration-only pass, run the platform-appropriate
+verification, and record structured outcomes. Build with `-IncludeShell` for
+the Unix deployment runtime and with `-IncludeFalconTemplates` to produce the
+separate `agent-shield-integrations.zip` import asset. Only `agent-shield.zip`
+belongs on endpoints. The templates intentionally contain no host-group ID,
 schedule, organization-specific action, or automatic remediation. Configure a
 pilot group and validate the imported actions in your Falcon tenant before any
-broader rollout. The release ZIP includes the template at `falcon-rtr/`.
+broader rollout.
 
 ## Intune
 

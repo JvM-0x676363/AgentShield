@@ -1,0 +1,23 @@
+{
+  "_about": "Sanitized manual mock data for the Windows Falcon workflow. Falcon does not import node mocks from YAML. Copy the success values into the matching nodes in Test view, then apply a scenario override to exercise that branch. The device identifier and hostname are fictitious.",
+  "success": {
+    "SelectPilotEndpoints": { "devices": ["0000000000000000000000000000a001"] },
+    "GetDeviceDetails": { "Platform": "Windows", "Hostname": "MOCK-WIN-01", "AgentVersion": "0.0.0" },
+    "PutAgentShieldPackage": { "file_path": "C:\\Windows\\Temp\\agent-shield.zip", "stdout": "Operation completed successfully.", "stderr": "" },
+    "DeployAgentShieldConfiguration": { "stdout": "{\"schema_version\":1,\"event\":\"result\",\"status\":\"success\",\"exit_code\":0,\"runner\":\"deploy\",\"scope\":\"fleet\",\"managed\":true,\"dry_run\":false,\"targets\":{\"ok\":1,\"failed\":0}}", "stderr": "" },
+    "RunManagedDetector": { "stdout": "{\"schema_version\":1,\"event\":\"result\",\"status\":\"success\",\"exit_code\":0,\"runner\":\"detect-managed\",\"scope\":\"machine\",\"compliant\":true}", "stderr": "" },
+    "WriteSuccessLog": { "records_written": 1 },
+    "WriteFailureLog": { "records_written": 1 }
+  },
+  "scenario_overrides": {
+    "deployment_failed": {
+      "DeployAgentShieldConfiguration": { "stdout": "{\"schema_version\":1,\"event\":\"result\",\"status\":\"failed\",\"exit_code\":1,\"runner\":\"deploy\",\"scope\":\"fleet\",\"managed\":false,\"dry_run\":false,\"targets\":{\"ok\":0,\"failed\":1}}", "stderr": "simulated deployment failure" }
+    },
+    "not_compliant": {
+      "RunManagedDetector": { "stdout": "{\"schema_version\":1,\"event\":\"result\",\"status\":\"failed\",\"exit_code\":1,\"runner\":\"detect-managed\",\"scope\":\"machine\",\"compliant\":false}", "stderr": "simulated compliance failure" }
+    },
+    "wrong_platform": {
+      "GetDeviceDetails": { "Platform": "Linux", "Hostname": "MOCK-NON-WINDOWS-01", "AgentVersion": "0.0.0" }
+    }
+  }
+}

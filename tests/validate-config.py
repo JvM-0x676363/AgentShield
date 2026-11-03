@@ -1769,6 +1769,9 @@ if check(os.path.isfile(os.path.join(ROOT, VERIFY)), "exists: %s" % VERIFY):
           "  prints stable result line")
     check("--expect-managed" in vtxt,
           "  distinguishes missing admin layer from required admin layer")
+    for token in ("--machine-detector", '"runner": "detect-managed"',
+                  'result["compliant"] = exit_code == 0'):
+        check(token in vtxt, "  supports managed detector contract: %s" % token)
     # The engine injects payload_by_os before writing. A verifier comparing
     # raw payload would flag divergence on the CORRECT file.
     check("apply_payload_by_os(spec" in vtxt,
@@ -2077,8 +2080,63 @@ if check(deploy_req is not None and pkg_files is not None,
     pkg_text = read("build-package.ps1")
     for d in ("targets", "policy", "lib"):
         check(d in pkg_text, "build-package mentions folder '%s'" % d)
-    check('"integrations/vscode-gpo/vscode-policy.json"' in pkg_text,
-          "build-package includes VS Code baseline when -IncludeGpo")
+    check("$IntegrationFiles = @()" in pkg_text,
+          "build-package separates optional integration assets")
+    check("[switch]$IncludeGpo" in pkg_text and
+          '"integrations/vscode-gpo/vscode-policy.json"' in pkg_text,
+          "build-package includes VS Code baseline only with -IncludeGpo")
+    for _term in ("integrations/falcon-rtr/README.md",
+                  "integrations/falcon-rtr/agentshield-deploy.workflow.template.yaml",
+                  "integrations/falcon-rtr/agentshield-deploy-windows.mocks.template.json",
+                  "integrations/falcon-rtr/agentshield-deploy-linux.mocks.template.json",
+                  "integrations/falcon-rtr/agentshield-deploy-macos.mocks.template.json"):
+        check(_term in pkg_text, "build-package can package %s" % _term)
+    check("[switch]$IncludeFalconTemplates" in pkg_text and
+          '"$Name-integrations"' in pkg_text,
+          "build-package emits optional integration archive")
+    check(not any(rel.startswith("integrations/") for rel in pkg_files),
+          "deployment archive excludes integration assets")
+    _shell_block = re.search(r"if \(\$IncludeShell\) \{(.*?)\n\}", pkg_text, re.S)
+    check(_shell_block is not None, "build-package defines an -IncludeShell payload block")
+    if _shell_block:
+        for _term in ("scripts/unix/install.sh", "scripts/unix/deploy.sh",
+                      "scripts/unix/Test-AgentShieldManaged.sh",
+                      "tests/verify-install.py"):
+            check(_term in _shell_block.group(1),
+                  "  -IncludeShell includes %s" % _term)
+
+for _rel, _platform, _verification in (
+        ("integrations/falcon-rtr/agentshield-deploy.workflow.template.yaml", "Windows",
+         "Test-AgentShieldManaged.ps1"),
+        ("integrations/falcon-rtr/agentshield-deploy-linux.workflow.template.yaml", "Linux",
+         "Test-AgentShieldManaged.sh"),
+        ("integrations/falcon-rtr/agentshield-deploy-macos.workflow.template.yaml", "Mac",
+         "Test-AgentShieldManaged.sh")):
+    _workflow_path = os.path.join(ROOT, _rel)
+    if check(os.path.isfile(_workflow_path), "exists: %s" % _rel):
+        _workflow = open(_workflow_path, encoding="utf-8").read()
+        check("name: On demand" in _workflow and "type: On demand" in _workflow,
+              "  %s workflow remains manually triggered" % _platform)
+        check("<FALCON_HOST_GROUP_ID>" in _workflow,
+              "  %s workflow retains host-group placeholder" % _platform)
+        check("*'*\\\"status\\\":\\\"success\\\"*'" in _workflow,
+              "  %s workflow uses wildcard JSON success condition" % _platform)
+        check(_verification in _workflow,
+              "  %s workflow invokes its managed-control verifier" % _platform)
+        if _platform == "Windows":
+            check("*'*\\\"compliant\\\":true*'" in _workflow,
+                  "  Windows workflow uses wildcard compliance condition")
+        else:
+            check("GetDeviceDetails.Platform:'%s'" % _platform in _workflow,
+                  "  %s workflow filters its platform" % _platform)
+            check("/var/tmp/agent-shield" in _workflow,
+                  "  %s workflow uses Unix staging" % _platform)
+
+UNIX_DETECTOR = "scripts/unix/Test-AgentShieldManaged.sh"
+if check(os.path.isfile(os.path.join(ROOT, UNIX_DETECTOR)), "exists: %s" % UNIX_DETECTOR):
+    _unix_detector = open(os.path.join(ROOT, UNIX_DETECTOR), encoding="utf-8").read()
+    for _term in ("--machine-detector", "--output-mode", "Python 3 is required"):
+        check(_term in _unix_detector, "  Unix managed detector contains %s" % _term)
 
 install_req = ps_array(read("install.ps1"), "required")
 if install_req is not None:

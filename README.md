@@ -83,6 +83,21 @@ context, enumerates target profiles, writes a transcript when available, and
 ends with a stable `AGENTSHIELD:` result line. See
 [operations and endpoint deployment](docs/OPERATIONS.md).
 
+### Build distribution artifacts
+
+`agent-shield.zip` is the endpoint deployment payload. It contains runtime
+configuration, scripts, and manifests only. Falcon workflow templates and VS
+Code GPO files are optional operator assets in a separate
+`agent-shield-integrations.zip` archive:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
+  -OutDir .\dist -Force -IncludeShell -IncludeFalconTemplates -IncludeGpo
+```
+
+Upload only `agent-shield.zip` to endpoint tooling. Import or distribute the
+integration archive from an operator workstation; never stage it on endpoints.
+
 ## Validate before publishing or rollout
 
 ```powershell

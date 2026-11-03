@@ -1,8 +1,8 @@
 # =============================================================================
-# Packages AgentShield into a single .zip for remote execution.
+# Packages AgentShield deployment payloads and optional integration assets.
 # Primary target: Falcon RTR, where `put` sends one file at a time.
 #
-# Usage: .\scripts\windows\build-package.ps1 [-OutDir <dir>] [-IncludeGpo] [-IncludeShell]
+# Usage: .\scripts\windows\build-package.ps1 [-OutDir <dir>] [-IncludeShell] [-IncludeGpo] [-IncludeFalconTemplates]
 #
 # Validates everything BEFORE packaging: packages will not contain unparsable
 # scripts, invalid JSON, or hooks with CRLF/BOM.
@@ -11,8 +11,9 @@
 param(
     [string]$OutDir      = ".",
     [string]$Name        = "agent-shield",
-    [switch]$IncludeGpo,      # includes integrations/vscode-gpo/ (typically distributed via SYSVOL, not RTR)
-    [switch]$IncludeShell,    # includes deploy.sh for Linux/macOS hosts
+    [switch]$IncludeGpo,      # adds VS Code GPO assets to the separate integrations archive
+    [switch]$IncludeShell,    # includes Unix runners, verifier, and managed detector
+    [switch]$IncludeFalconTemplates, # adds Falcon workflow templates to the separate integrations archive
     [switch]$Force            # overwrites existing zip
 )
 
@@ -40,15 +41,26 @@ $Files = @(
     "hooks/pre-commit",
     "scripts/windows/install.ps1",
     "scripts/windows/deploy.ps1",
-    "scripts/windows/Test-AgentShieldManaged.ps1",
-    "integrations/falcon-rtr/README.md",
-    "integrations/falcon-rtr/agentshield-deploy.workflow.template.yaml"
+    "scripts/windows/Test-AgentShieldManaged.ps1"
 )
 if ($IncludeShell) {
     $Files += "scripts/unix/install.sh"
     $Files += "scripts/unix/deploy.sh"
+    $Files += "scripts/unix/Test-AgentShieldManaged.sh"
     $Files += "lib/apply_targets.py"
     $Files += "lib/security-tools.sh"
+    $Files += "tests/verify-install.py"
+}
+
+$IntegrationFiles = @()
+if ($IncludeFalconTemplates) {
+    $IntegrationFiles += "integrations/falcon-rtr/README.md"
+    $IntegrationFiles += "integrations/falcon-rtr/agentshield-deploy.workflow.template.yaml"
+    $IntegrationFiles += "integrations/falcon-rtr/agentshield-deploy-linux.workflow.template.yaml"
+    $IntegrationFiles += "integrations/falcon-rtr/agentshield-deploy-macos.workflow.template.yaml"
+    $IntegrationFiles += "integrations/falcon-rtr/agentshield-deploy-windows.mocks.template.json"
+    $IntegrationFiles += "integrations/falcon-rtr/agentshield-deploy-linux.mocks.template.json"
+    $IntegrationFiles += "integrations/falcon-rtr/agentshield-deploy-macos.mocks.template.json"
 }
 
 # Entire targets/ and policy/ directories are discovered dynamically.
@@ -94,10 +106,10 @@ foreach ($rel in ($manifestFiles | Sort-Object -Unique)) {
     if ($Files -notcontains $rel) { $Files += $rel }
 }
 if ($IncludeGpo) {
-    $Files += "integrations/vscode-gpo/install-extensions.ps1"
-    $Files += "integrations/vscode-gpo/download-vsix.ps1"
-    $Files += "integrations/vscode-gpo/vscode-policy.json"
-    $Files += "integrations/vscode-gpo/README.md"
+    $IntegrationFiles += "integrations/vscode-gpo/install-extensions.ps1"
+    $IntegrationFiles += "integrations/vscode-gpo/download-vsix.ps1"
+    $IntegrationFiles += "integrations/vscode-gpo/vscode-policy.json"
+    $IntegrationFiles += "integrations/vscode-gpo/README.md"
 }
 
 function Get-PackageRelativePath {
@@ -108,6 +120,7 @@ function Get-PackageRelativePath {
         "scripts/windows/Test-AgentShieldManaged.ps1" { return "Test-AgentShieldManaged.ps1" }
         "scripts/unix/install.sh" { return "install.sh" }
         "scripts/unix/deploy.sh" { return "deploy.sh" }
+        "scripts/unix/Test-AgentShieldManaged.sh" { return "Test-AgentShieldManaged.sh" }
         default {
             if ($RelativePath.StartsWith("integrations/falcon-rtr/")) {
                 return $RelativePath.Substring("integrations/".Length)
@@ -138,7 +151,7 @@ $errors = @()
 # =============================================================================
 Sec "Validation"
 
-foreach ($rel in $Files) {
+foreach ($rel in ($Files + $IntegrationFiles)) {
     $full = Join-Path $RepoRoot ($rel -replace '/', '\')
     if (-not (Test-Path $full)) {
         $errors += "missing: $rel"
@@ -208,47 +221,59 @@ if ($errors.Count -gt 0) {
 # =============================================================================
 Sec "Packaging"
 
-$stamp   = Get-Date -Format "yyyyMMdd-HHmmss"
-$staging = Join-Path ([System.IO.Path]::GetTempPath()) "$Name-$stamp"
-New-Item -ItemType Directory -Force -Path $staging | Out-Null
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
-try {
-    foreach ($rel in $Files) {
-        $src = Join-Path $RepoRoot ($rel -replace '/', '\')
-        $packageRel = Get-PackageRelativePath $rel
-        $dst = Join-Path $staging ($packageRel -replace '/', '\')
-        $dstDir = Split-Path $dst -Parent
-        if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
-        Copy-Item $src $dst -Force
+function New-AgentShieldArchive {
+    param([string[]]$PackageFiles, [string]$ArchiveName)
+
+    $staging = Join-Path ([System.IO.Path]::GetTempPath()) "$ArchiveName-$stamp"
+    New-Item -ItemType Directory -Force -Path $staging | Out-Null
+    try {
+        foreach ($rel in $PackageFiles) {
+            $src = Join-Path $RepoRoot ($rel -replace '/', '\')
+            $packageRel = Get-PackageRelativePath $rel
+            $dst = Join-Path $staging ($packageRel -replace '/', '\')
+            $dstDir = Split-Path $dst -Parent
+            if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
+            Copy-Item $src $dst -Force
+        }
+
+        $manifest = @("# AgentShield -- package $stamp", "")
+        foreach ($rel in $PackageFiles) {
+            $packageRel = Get-PackageRelativePath $rel
+            $h = Get-Sha256Hex (Join-Path $staging ($packageRel -replace '/', '\'))
+            $manifest += ("{0}  {1}" -f $h, $packageRel)
+        }
+        $enc = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText((Join-Path $staging "MANIFEST.txt"), ($manifest -join "`n"), $enc)
+
+        New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+        $zip = Join-Path (Resolve-Path $OutDir).Path "$ArchiveName.zip"
+        if ((Test-Path $zip) -and -not $Force) {
+            throw "Already exists: $zip  (use -Force to overwrite)"
+        }
+        if (Test-Path $zip) { Remove-Item $zip -Force }
+        Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $zip -CompressionLevel Optimal
+
+        return [pscustomobject]@{
+            Path = $zip
+            Hash = Get-Sha256Hex $zip
+            SizeKb = [math]::Round((Get-Item $zip).Length / 1KB, 1)
+        }
+    } finally {
+        Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
 
-    $manifest = @("# AgentShield -- package $stamp", "")
-    foreach ($rel in $Files) {
-        $packageRel = Get-PackageRelativePath $rel
-        $h = Get-Sha256Hex (Join-Path $staging ($packageRel -replace '/', '\'))
-        $manifest += ("{0}  {1}" -f $h, $packageRel)
-    }
-    $enc = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText((Join-Path $staging "MANIFEST.txt"), ($manifest -join "`n"), $enc)
+$deploymentArchive = New-AgentShieldArchive -PackageFiles $Files -ArchiveName $Name
+Info "  deployment: $($deploymentArchive.Path)"
+Info "  $($deploymentArchive.SizeKb) KB | SHA256 $($deploymentArchive.Hash)"
 
-    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-    $zip = Join-Path (Resolve-Path $OutDir).Path "$Name.zip"
-    if ((Test-Path $zip) -and -not $Force) {
-        Err "Already exists: $zip  (use -Force to overwrite)"
-        exit 1
-    }
-    if (Test-Path $zip) { Remove-Item $zip -Force }
-
-    Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $zip -CompressionLevel Optimal
-
-    $zipHash = Get-Sha256Hex $zip
-    $zipKb   = [math]::Round((Get-Item $zip).Length / 1KB, 1)
-
-    Info "  $zip"
-    Info "  $zipKb KB | SHA256 $zipHash"
-
-} finally {
-    Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
+if ($IntegrationFiles.Count -gt 0) {
+    $integrationArchive = New-AgentShieldArchive -PackageFiles $IntegrationFiles -ArchiveName "$Name-integrations"
+    Info "  integrations: $($integrationArchive.Path)"
+    Info "  $($integrationArchive.SizeKb) KB | SHA256 $($integrationArchive.Hash)"
+    Info "  Keep integration assets out of endpoint staging; import or distribute them separately."
 }
 
 # =============================================================================

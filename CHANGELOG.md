@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here.
 
+## 1.0.2 - 2026-11-03
+
+- Corrected Falcon RTR JSON result conditions using the syntax validated by a
+  mocked Windows workflow.
+- Added Linux and macOS Falcon RTR workflow templates for tenant-specific mock
+  and pilot validation.
+- Added Unix verification assets to `-IncludeShell` packages and restored
+  Bash 3.2 compatibility in the Unix fleet deployment script for macOS.
+- Added a Linux/macOS managed-control detector for MDM and Falcon RTR.
+- Split deployment payloads from optional Falcon and GPO integration assets.
+- Confirmed Falcon mock success paths for the Windows, Linux, and macOS
+  workflow templates; live pilots remain required.
+- Added sanitized Falcon mock fixtures for manual Test-view configuration after
+  a workflow import.
+
 ## 1.0.1 - 2026-11-03
 
 - Added a Falcon Fusion RTR workflow template with mock-test guidance and

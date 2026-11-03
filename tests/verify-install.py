@@ -361,6 +361,8 @@ def main():
                     choices=["windows", "linux", "darwin"], default=current_os())
     ap.add_argument("--expect-managed", action="store_true",
                     help="treats missing admin layer as FAILURE")
+    ap.add_argument("--machine-detector", action="store_true",
+                    help="verify only managed controls and emit detector-compatible output")
     ap.add_argument("--skip-git", action="store_true")
     ap.add_argument("--quiet", action="store_true",
                     help="legacy console mode: show failures and summary only")
@@ -368,6 +370,11 @@ def main():
                     default="Console",
                     help="Console (default), Json events, or a final Quiet JSON result")
     args = ap.parse_args()
+
+    if args.machine_detector:
+        args.only = "managed"
+        args.expect_managed = True
+        args.skip_git = True
 
     QUIET = args.quiet
     OUTPUT_MODE = args.output_mode
@@ -408,7 +415,7 @@ def main():
         print("AGENTSHIELD: VERIFY DONE ok=%d warn=%d fail=%d only=%s"
               % (_counts["OK"], _counts["WARN"], _counts["FAIL"], args.only))
     else:
-        print(json.dumps({
+        result = {
             "schema_version": 1,
             "event": "result",
             "run_id": RUN_ID,
@@ -416,13 +423,16 @@ def main():
             "duration_ms": round((time.monotonic() - STARTED_MONOTONIC) * 1000),
             "status": status,
             "exit_code": exit_code,
-            "runner": "verify-install",
-            "scope": "endpoint",
+            "runner": "detect-managed" if args.machine_detector else "verify-install",
+            "scope": "machine" if args.machine_detector else "endpoint",
             "selected": sorted(only),
             "expect_managed": args.expect_managed,
             "counts": {"ok": _counts["OK"], "warn": _counts["WARN"],
                        "failed": _counts["FAIL"]},
-        }, separators=(",", ":")))
+        }
+        if args.machine_detector:
+            result["compliant"] = exit_code == 0
+        print(json.dumps(result, separators=(",", ":")))
     return exit_code
 
 
