@@ -37,3 +37,8 @@ GitHub runs `Validate repository` for pull requests and pushes to `main`. Its
 and release packaging. Its `Unix shell validation` job checks the shipped Unix
 and Falcon RTR shell scripts. These jobs use read-only repository permissions
 and do not deploy to endpoints.
+
+## Merge policy
+
+`main` requires linear history. Use rebase or squash merging; merge commits
+are intentionally blocked.
