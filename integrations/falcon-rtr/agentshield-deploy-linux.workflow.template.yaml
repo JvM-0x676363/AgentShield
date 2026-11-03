@@ -1,158 +1,96 @@
-# Candidate Linux Falcon Fusion RTR workflow. Validate its actions, mock output,
-# and a single pilot endpoint in the target tenant before enabling it.
+# Falcon Fusion RTR workflow template for Linux.
+# Upload the custom scripts, replace all placeholders, and set the reviewed
+# package SHA-256 in AgentShield-Apply-Unix before importing this file.
 
-name: '[Linux] AgentShield deployment - RTR template'
+name: '[Linux] AgentShield deployment - RTR'
 trigger:
-  next:
-    - SelectPilotEndpoints
   name: On demand
   type: On demand
-
+  next: [SelectPilotEndpoints]
 actions:
   SelectPilotEndpoints:
     id: 68ffa99af40c84b36462daa076f535d0
     default_name: Device Query
     name: Select pilot endpoints
-    next:
-      - ForEachSensorIDsConcurrently
     properties:
       device_status: normal
       group: <FALCON_HOST_GROUP_ID>
     version_constraint: ~1
-
+    next: [ForEachSensorIDsConcurrently]
 loops:
   ForEachSensorIDsConcurrently:
-    display: Deploy to each selected Linux sensor concurrently
-    name: Deploy to each selected Linux sensor concurrently
+    name: Apply on each selected Linux sensor concurrently
+    display: Apply on each selected Linux sensor concurrently
     for:
       input: SelectPilotEndpoints.devices
       continue_on_partial_execution: true
       sequential: false
     trigger:
-      next:
-        - GetDeviceDetails
+      next: [GetDeviceDetails]
     actions:
       GetDeviceDetails:
         id: 6265dc947cc2252f74a5f25261ac36a9
         default_name: Get device details
         name: Get device details
-        next:
-          - platform_is_linux
         properties:
           device_id: ${SelectPilotEndpoints.devices.#}
         version_constraint: ~1
-
+        next: [platform_is_linux]
+      CleanAgentShieldStaging:
+        id: <AGENTSHIELD_CLEANUP_UNIX_ACTIVITY_ID>
+        default_name: AgentShield-Cleanup-Unix
+        name: Clean AgentShield staging
+        properties:
+          device_id: ${SelectPilotEndpoints.devices.#}
+          csfusion_rtr_timeout: 120
+        version_constraint: ~0
+        next: [PutAgentShieldPackage]
       PutAgentShieldPackage:
         id: 1f4e86048c1e676a59f60e961a8c0c15
         default_name: Put file
         name: Put AgentShield package
-        next:
-          - DeployAgentShieldConfiguration
         properties:
           device_id: ${SelectPilotEndpoints.devices.#}
           file_name: agent-shield.zip
           file_path: /var/tmp
           queue_offline: false
         version_constraint: ~1
-
-      DeployAgentShieldConfiguration:
-        id: 79149e361f8e47bb363847f43009cd1c
-        default_name: Run file
-        name: Deploy AgentShield configuration
-        next:
-          - deployment_succeeded
-          - deployment_failed
+        next: [ApplyAgentShieldConfiguration]
+      ApplyAgentShieldConfiguration:
+        id: <AGENTSHIELD_APPLY_UNIX_ACTIVITY_ID>
+        default_name: AgentShield-Apply-Unix
+        name: Apply AgentShield configuration
         properties:
           device_id: ${SelectPilotEndpoints.devices.#}
-          file_path: /bin/bash
-          params: >-
-            -lc "set -euo pipefail; mkdir -p /var/tmp/agent-shield; unzip -oq
-            /var/tmp/agent-shield.zip -d /var/tmp/agent-shield; /bin/bash
-            /var/tmp/agent-shield/deploy.sh --force --skip-tools --skip-vscode
-            --output-mode Quiet"
-          queue_offline: false
-          csfusion_rtr_timeout: 300
-        version_constraint: ~1
-
-      VerifyAgentShieldInstallation:
-        id: 79149e361f8e47bb363847f43009cd1c
-        default_name: Run file
-        name: Verify AgentShield managed controls
-        next:
-          - managed_controls_compliant
-          - managed_controls_not_compliant
-        properties:
-          device_id: ${SelectPilotEndpoints.devices.#}
-          file_path: /bin/bash
-          params: >-
-            /var/tmp/agent-shield/Test-AgentShieldManaged.sh --output-mode Quiet
-          queue_offline: false
-          csfusion_rtr_timeout: 120
-        version_constraint: ~1
-
-      RecordCompliantAgentShieldDeployment:
+          csfusion_rtr_timeout: 600
+        version_constraint: ~0
+        next: [RecordAgentShieldResult]
+      RecordAgentShieldResult:
         id: 04c59ceb6dff9e6cd89e5f5cf13121ab
         default_name: Write to log repo
-        name: Record compliant AgentShield deployment
+        name: Record AgentShield result
         properties:
-          _fields:
-            - ${Workflow.Definition.Name}
-            - ${Workflow.Execution.Time}
-            - ${GetDeviceDetails.Hostname}
-            - ${DeployAgentShieldConfiguration.stdout}
-            - ${VerifyAgentShieldInstallation.stdout}
-          custom_json: null
+          custom_json:
+            agentshield:
+              event: apply_result
+              workflow: ${Workflow.Definition.Name}
+              host_aid: ${SelectPilotEndpoints.devices.#}
+              host_platform: ${GetDeviceDetails.Platform}
+              outcome: ${ApplyAgentShieldConfiguration.outcome}
+              package_sha256: ${ApplyAgentShieldConfiguration.package_sha256}
+              extract_ok: ${ApplyAgentShieldConfiguration.extract_ok}
+              precheck_compliant: ${ApplyAgentShieldConfiguration.precheck_compliant}
+              precheck_exit_code: ${ApplyAgentShieldConfiguration.precheck_exit_code}
+              deploy_ran: ${ApplyAgentShieldConfiguration.deploy_ran}
+              deploy_status: ${ApplyAgentShieldConfiguration.deploy_status}
+              deploy_exit_code: ${ApplyAgentShieldConfiguration.deploy_exit_code}
+              validate_compliant: ${ApplyAgentShieldConfiguration.validate_compliant}
+              validate_exit_code: ${ApplyAgentShieldConfiguration.validate_exit_code}
+              cleanup_ok: ${ApplyAgentShieldConfiguration.cleanup_ok}
+              error: ${ApplyAgentShieldConfiguration.error}
         version_constraint: ~1
-
-      RecordAgentShieldDeploymentRequiringReview:
-        id: 04c59ceb6dff9e6cd89e5f5cf13121ab
-        default_name: Write to log repo
-        name: Record AgentShield deployment requiring review
-        properties:
-          _fields:
-            - AgentShield deployment or managed-control verification did not succeed.
-            - ${Workflow.Definition.Name}
-            - ${Workflow.Execution.Time}
-            - ${GetDeviceDetails.Hostname}
-            - ${DeployAgentShieldConfiguration.stdout}
-            - ${DeployAgentShieldConfiguration.stderr}
-            - ${VerifyAgentShieldInstallation.stdout}
-            - ${VerifyAgentShieldInstallation.stderr}
-          custom_json: null
-        version_constraint: ~1
-
     conditions:
       platform_is_linux:
-        next:
-          - PutAgentShieldPackage
+        display: [Platform is Linux]
         expression: GetDeviceDetails.Platform:'Linux'
-        display:
-          - Platform is equal to Linux
-
-      deployment_succeeded:
-        next:
-          - VerifyAgentShieldInstallation
-        expression: "DeployAgentShieldConfiguration.stdout:*'*\"status\":\"success\"*'"
-        display:
-          - Deployment JSON result has status success
-
-      deployment_failed:
-        next:
-          - RecordAgentShieldDeploymentRequiringReview
-        expression: "DeployAgentShieldConfiguration.stdout:*!'*\"status\":\"success\"*'"
-        display:
-          - Deployment JSON result does not have status success
-
-      managed_controls_compliant:
-        next:
-          - RecordCompliantAgentShieldDeployment
-        expression: "VerifyAgentShieldInstallation.stdout:*'*\"status\":\"success\"*'"
-        display:
-          - Verification JSON result has status success
-
-      managed_controls_not_compliant:
-        next:
-          - RecordAgentShieldDeploymentRequiringReview
-        expression: "VerifyAgentShieldInstallation.stdout:*!'*\"status\":\"success\"*'"
-        display:
-          - Verification JSON result does not have status success
+        next: [CleanAgentShieldStaging]

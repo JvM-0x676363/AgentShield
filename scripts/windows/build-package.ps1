@@ -61,6 +61,13 @@ if ($IncludeFalconTemplates) {
     $IntegrationFiles += "integrations/falcon-rtr/agentshield-deploy-windows.mocks.template.json"
     $IntegrationFiles += "integrations/falcon-rtr/agentshield-deploy-linux.mocks.template.json"
     $IntegrationFiles += "integrations/falcon-rtr/agentshield-deploy-macos.mocks.template.json"
+    $IntegrationFiles += "integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Windows.ps1"
+    $IntegrationFiles += "integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh"
+    $IntegrationFiles += "integrations/falcon-rtr/rtr-scripts/AgentShield-Cleanup-Windows.ps1"
+    $IntegrationFiles += "integrations/falcon-rtr/rtr-scripts/AgentShield-Cleanup-Unix.sh"
+    $IntegrationFiles += "integrations/falcon-rtr/rtr-scripts/AgentShield-Apply.input-schema.json"
+    $IntegrationFiles += "integrations/falcon-rtr/rtr-scripts/AgentShield-Apply.output-schema.json"
+    $IntegrationFiles += "integrations/falcon-rtr/rtr-scripts/AgentShield-Cleanup.output-schema.json"
 }
 
 # Entire targets/ and policy/ directories are discovered dynamically.
@@ -279,37 +286,22 @@ if ($IntegrationFiles.Count -gt 0) {
 # =============================================================================
 # INSTRUCTIONS
 # =============================================================================
-Sec "How to use with Falcon RTR"
+Sec "Falcon RTR v3 workflow"
 
 $howto = @'
-  1) Upload zip to file library (Response > Response scripts and files)
+  1) Upload __NAME__.zip to the Falcon file library.
 
-  2) In host RTR session:
+  2) Extract __NAME__-integrations.zip on an operator workstation.
+     Upload the custom scripts, apply schemas, configure the package SHA-256,
+     replace workflow placeholders, then import the selected workflow.
 
-     cd C:\Windows\Temp
-     put __NAME__.zip
-     runscript -Raw=```Expand-Archive -Path 'C:\Windows\Temp\__NAME__.zip' -DestinationPath 'C:\Windows\Temp\__NAME__' -Force```
+  3) Configure mocks in Falcon Test view. Workflow imports do not include them.
 
-  3) Fast pass -- configuration only, seconds:
+  4) Run one approved pilot endpoint before widening the rollout.
 
-     runscript -Timeout=300 -Raw=```& 'C:\Windows\Temp\__NAME__\deploy.ps1' -Force -SkipTools -SkipVSCode -OutputMode Json```
+  The workflow, custom scripts, and mock guidance are in falcon-rtr\README.md.
 
-  4) Tools pass -- minutes, network dependent:
-
-     runscript -Timeout=600 -Raw=```& 'C:\Windows\Temp\__NAME__\deploy.ps1' -Force -SkipVSCode -OutputMode Json```
-
-  5) Verify managed enforcement:
-
-     runscript -Timeout=60 -Raw=```& 'C:\Windows\Temp\__NAME__\Test-AgentShieldManaged.ps1'```
-
-  6) Retrieve log:
-
-     get C:\Windows\Temp\agent-shield-deploy.log
-
-  VS Code extensions are NOT deployed via RTR (require logged-in user).
-  Deploy via GPO -- see vscode-gpo\README.md
-
-  Exit codes: 0 ok | 1 failed | 2 non-interactive without -Force (nothing modified)
+  VS Code extensions require user context. Deploy through GPO or equivalent MDM.
 '@
 Write-Host $howto.Replace("__NAME__", $Name) -ForegroundColor Gray
 

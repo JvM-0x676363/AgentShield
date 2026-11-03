@@ -1,26 +1,19 @@
 {
-  "_about": "Sanitized manual mock data for the macOS Falcon workflow. Falcon does not import node mocks from YAML. Copy the success values into the matching nodes in Test view, then apply a scenario override to exercise that branch. The device identifier and hostname are fictitious.",
+  "_about": "Sanitized manual mock data for the macOS v3 workflow. Falcon does not import node mocks from YAML. Copy success values into matching Test-view nodes, then apply one scenario override. All identifiers are fictitious.",
   "success": {
-    "SelectPilotEndpoints": { "devices": ["0000000000000000000000000000a001"] },
-    "GetDeviceDetails": { "Platform": "Mac", "Hostname": "MOCK-MAC-01", "AgentVersion": "0.0.0" },
-    "PutAgentShieldPackage": { "file_path": "/var/tmp/agent-shield.zip", "stdout": "Operation completed successfully.", "stderr": "" },
-    "DeployAgentShieldConfiguration": { "stdout": "{\"schema_version\":1,\"event\":\"result\",\"status\":\"success\",\"exit_code\":0,\"runner\":\"deploy\",\"scope\":\"fleet\",\"managed\":true,\"dry_run\":false,\"targets\":{\"ok\":1,\"failed\":0}}", "stderr": "" },
-    "VerifyAgentShieldInstallation": { "stdout": "{\"schema_version\":1,\"event\":\"result\",\"status\":\"success\",\"exit_code\":0,\"runner\":\"detect-managed\",\"scope\":\"machine\",\"selected\":[\"managed\"],\"expect_managed\":true,\"counts\":{\"ok\":1,\"warn\":0,\"failed\":0},\"compliant\":true}", "stderr": "" },
-    "RecordCompliantAgentShieldDeployment": { "records_written": 1 },
-    "RecordAgentShieldDeploymentRequiringReview": { "records_written": 1 }
+    "SelectPilotEndpoints": {"devices": ["0000000000000000000000000000a001"]},
+    "GetDeviceDetails": {"Platform": "Mac", "Hostname": "MOCK-MAC-01"},
+    "CleanAgentShieldStaging": {"cleanup_ok": true, "removed_zip": false, "removed_dir": false, "base_dir": "/var/tmp", "cleanup_error": ""},
+    "PutAgentShieldPackage": {"file_path": "/var/tmp/agent-shield.zip", "stdout": "Operation completed successfully.", "stderr": ""},
+    "ApplyAgentShieldConfiguration": {"outcome": "compliant_after_deploy", "platform": "mac", "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "extract_ok": true, "precheck_compliant": false, "precheck_exit_code": 1, "deploy_ran": true, "deploy_status": "success", "deploy_exit_code": 0, "validate_compliant": true, "validate_exit_code": 0, "deploy_log_path": "/var/log/agentshield/agent-shield-deploy.log", "error": "", "cleanup_ok": true, "cleanup_error": ""},
+    "RecordAgentShieldResult": {"records_written": 1}
   },
   "scenario_overrides": {
-    "deployment_failed": {
-      "DeployAgentShieldConfiguration": { "stdout": "{\"schema_version\":1,\"event\":\"result\",\"status\":\"failed\",\"exit_code\":1,\"runner\":\"deploy\",\"scope\":\"fleet\",\"managed\":false,\"dry_run\":false,\"targets\":{\"ok\":0,\"failed\":1}}", "stderr": "simulated deployment failure" }
-    },
-    "not_compliant": {
-      "VerifyAgentShieldInstallation": { "stdout": "{\"schema_version\":1,\"event\":\"result\",\"status\":\"failed\",\"exit_code\":1,\"runner\":\"detect-managed\",\"scope\":\"machine\",\"selected\":[\"managed\"],\"expect_managed\":true,\"counts\":{\"ok\":0,\"warn\":0,\"failed\":1},\"compliant\":false}", "stderr": "simulated compliance failure" }
-    },
-    "wrong_platform": {
-      "GetDeviceDetails": { "Platform": "Linux", "Hostname": "MOCK-NON-MAC-01", "AgentVersion": "0.0.0" }
-    },
-    "python_unavailable": {
-      "VerifyAgentShieldInstallation": { "stdout": "", "stderr": "Python 3 is required for managed-control verification" }
-    }
+    "already_compliant": {"ApplyAgentShieldConfiguration": {"outcome": "already_compliant", "precheck_compliant": true, "precheck_exit_code": 0, "deploy_ran": false, "deploy_status": "", "deploy_exit_code": -1, "validate_compliant": false, "validate_exit_code": -1}},
+    "precheck_failed": {"ApplyAgentShieldConfiguration": {"outcome": "precheck_failed", "precheck_compliant": false, "precheck_exit_code": -1, "deploy_ran": false, "error": "Simulated precheck failure."}},
+    "deploy_failed": {"ApplyAgentShieldConfiguration": {"outcome": "deploy_failed", "deploy_ran": true, "deploy_status": "failed", "deploy_exit_code": 1, "validate_compliant": false, "validate_exit_code": -1, "error": "Simulated deployment failure."}},
+    "validation_failed": {"ApplyAgentShieldConfiguration": {"outcome": "validation_failed", "deploy_ran": true, "deploy_status": "success", "deploy_exit_code": 0, "validate_compliant": false, "validate_exit_code": -1, "error": "Simulated validation failure."}},
+    "not_compliant_after_deploy": {"ApplyAgentShieldConfiguration": {"outcome": "not_compliant_after_deploy", "deploy_ran": true, "deploy_status": "success", "deploy_exit_code": 0, "validate_compliant": false, "validate_exit_code": 1, "error": "Simulated validation failure."}},
+    "wrong_platform": {"GetDeviceDetails": {"Platform": "Linux", "Hostname": "MOCK-NON-MAC-01"}}
   }
 }

@@ -69,5 +69,5 @@ same deployment archive.
 
 `-IncludeFalconTemplates` and `-IncludeGpo` create a separate
 `agent-shield-integrations.zip`. It contains operator-side workflow templates
-with sanitized mock fixtures and/or GPO files and must not be staged on an
-endpoint.
+with sanitized mock fixtures, Falcon RTR custom scripts and schemas, and/or
+GPO files. It must not be staged on an endpoint.

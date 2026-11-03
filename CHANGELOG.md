@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+- Replaced the Falcon workflow baseline with the v3 custom-script flow,
+  including package SHA-256 verification, bounded staging cleanup, and typed
+  failure states.
+- Rewrote the public Falcon RTR templates, mock fixtures, custom scripts, and
+  operator guide in English.
+
 ## 1.0.2 - 2026-11-03
 
 - Corrected Falcon RTR JSON result conditions using the syntax validated by a
@@ -16,7 +24,6 @@ All notable changes to this project are documented here.
   workflow templates; live pilots remain required.
 - Added sanitized Falcon mock fixtures for manual Test-view configuration after
   a workflow import.
-
 ## 1.0.1 - 2026-11-03
 
 - Added a Falcon Fusion RTR workflow template with mock-test guidance and

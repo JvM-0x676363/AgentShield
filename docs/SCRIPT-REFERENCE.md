@@ -28,7 +28,7 @@ not endpoint staging.
 |---|---|---|
 | None | `agent-shield.zip` | Windows deployment runtime. |
 | `-IncludeShell` | `agent-shield.zip` | Adds Linux/macOS runtime and managed detector. |
-| `-IncludeFalconTemplates` | `agent-shield-integrations.zip` | Falcon Fusion workflow templates, sanitized mock fixtures, and guide. |
+| `-IncludeFalconTemplates` | `agent-shield-integrations.zip` | Falcon Fusion v3 templates, sanitized mocks, custom scripts, schemas, and guide. |
 | `-IncludeGpo` | `agent-shield-integrations.zip` | VS Code GPO scripts, policy, and guide. |
 
 ```powershell

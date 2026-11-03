@@ -2089,7 +2089,11 @@ if check(deploy_req is not None and pkg_files is not None,
                   "integrations/falcon-rtr/agentshield-deploy.workflow.template.yaml",
                   "integrations/falcon-rtr/agentshield-deploy-windows.mocks.template.json",
                   "integrations/falcon-rtr/agentshield-deploy-linux.mocks.template.json",
-                  "integrations/falcon-rtr/agentshield-deploy-macos.mocks.template.json"):
+                  "integrations/falcon-rtr/agentshield-deploy-macos.mocks.template.json",
+                  "integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Windows.ps1",
+                  "integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh",
+                  "integrations/falcon-rtr/rtr-scripts/AgentShield-Cleanup-Windows.ps1",
+                  "integrations/falcon-rtr/rtr-scripts/AgentShield-Cleanup-Unix.sh"):
         check(_term in pkg_text, "build-package can package %s" % _term)
     check("[switch]$IncludeFalconTemplates" in pkg_text and
           '"$Name-integrations"' in pkg_text,
@@ -2105,13 +2109,13 @@ if check(deploy_req is not None and pkg_files is not None,
             check(_term in _shell_block.group(1),
                   "  -IncludeShell includes %s" % _term)
 
-for _rel, _platform, _verification in (
+for _rel, _platform, _activity in (
         ("integrations/falcon-rtr/agentshield-deploy.workflow.template.yaml", "Windows",
-         "Test-AgentShieldManaged.ps1"),
+         "<AGENTSHIELD_APPLY_WINDOWS_ACTIVITY_ID>"),
         ("integrations/falcon-rtr/agentshield-deploy-linux.workflow.template.yaml", "Linux",
-         "Test-AgentShieldManaged.sh"),
+         "<AGENTSHIELD_APPLY_UNIX_ACTIVITY_ID>"),
         ("integrations/falcon-rtr/agentshield-deploy-macos.workflow.template.yaml", "Mac",
-         "Test-AgentShieldManaged.sh")):
+         "<AGENTSHIELD_APPLY_UNIX_ACTIVITY_ID>")):
     _workflow_path = os.path.join(ROOT, _rel)
     if check(os.path.isfile(_workflow_path), "exists: %s" % _rel):
         _workflow = open(_workflow_path, encoding="utf-8").read()
@@ -2119,18 +2123,52 @@ for _rel, _platform, _verification in (
               "  %s workflow remains manually triggered" % _platform)
         check("<FALCON_HOST_GROUP_ID>" in _workflow,
               "  %s workflow retains host-group placeholder" % _platform)
-        check("*'*\\\"status\\\":\\\"success\\\"*'" in _workflow,
-              "  %s workflow uses wildcard JSON success condition" % _platform)
-        check(_verification in _workflow,
-              "  %s workflow invokes its managed-control verifier" % _platform)
-        if _platform == "Windows":
-            check("*'*\\\"compliant\\\":true*'" in _workflow,
-                  "  Windows workflow uses wildcard compliance condition")
-        else:
-            check("GetDeviceDetails.Platform:'%s'" % _platform in _workflow,
-                  "  %s workflow filters its platform" % _platform)
-            check("/var/tmp/agent-shield" in _workflow,
-                  "  %s workflow uses Unix staging" % _platform)
+        check(_activity in _workflow and "RecordAgentShieldResult" in _workflow,
+              "  %s workflow uses typed custom apply activity" % _platform)
+        check("package_sha256:" in _workflow and "expected_release:" not in _workflow,
+              "  %s workflow logs package hash without fixed release" % _platform)
+        check("GetDeviceDetails.Platform:'%s'" % _platform in _workflow,
+              "  %s workflow filters its platform" % _platform)
+
+for _rel, _platform, _base_dir in (
+        ("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Windows.ps1", "Windows", "C:\\Windows\\Temp"),
+        ("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh", "Unix", "/var/tmp"),
+        ("integrations/falcon-rtr/rtr-scripts/AgentShield-Cleanup-Windows.ps1", "Windows", "C:\\Windows\\Temp"),
+        ("integrations/falcon-rtr/rtr-scripts/AgentShield-Cleanup-Unix.sh", "Unix", "/var/tmp")):
+    _script_path = os.path.join(ROOT, _rel)
+    if check(os.path.isfile(_script_path), "exists: %s" % _rel):
+        _script = open(_script_path, encoding="utf-8").read()
+        check(_base_dir in _script, "  %s custom script fixes its staging directory" % _platform)
+
+for _rel in ("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Windows.ps1",
+             "integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh"):
+    _apply = open(os.path.join(ROOT, _rel), encoding="utf-8").read()
+    check("<AGENTSHIELD_PACKAGE_SHA256>" in _apply,
+          "  custom apply script requires configured package SHA-256: %s" % _rel)
+check("bash -l" not in read("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh"),
+      "  Unix custom apply script does not load a login shell")
+check("precheck_failed" in read("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Windows.ps1") and
+      "validation_failed" in read("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Windows.ps1") and
+      "$deployment.exit_code -ne 0" in read("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Windows.ps1"),
+      "  Windows custom apply script fails closed on invalid checks and deployment errors")
+check("precheck_failed" in read("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh") and
+      "validation_failed" in read("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh") and
+      '"$DEPLOY_CODE" -ne 0' in read("integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh"),
+      "  Unix custom apply script fails closed on invalid checks and deployment errors")
+
+for _rel in ("integrations/falcon-rtr/agentshield-deploy-windows.mocks.template.json",
+             "integrations/falcon-rtr/agentshield-deploy-linux.mocks.template.json",
+             "integrations/falcon-rtr/agentshield-deploy-macos.mocks.template.json"):
+    _mock_path = os.path.join(ROOT, _rel)
+    if check(os.path.isfile(_mock_path), "exists: %s" % _rel):
+        try:
+            _mock = json.load(open(_mock_path, encoding="utf-8"))
+            check("success" in _mock and "scenario_overrides" in _mock and
+                  {"already_compliant", "precheck_failed", "deploy_failed", "validation_failed",
+                   "not_compliant_after_deploy", "wrong_platform"}.issubset(_mock["scenario_overrides"]),
+                  "  mock fixture covers success and expected failure scenarios")
+        except ValueError as exc:
+            check(False, "  mock fixture is valid JSON", str(exc))
 
 UNIX_DETECTOR = "scripts/unix/Test-AgentShieldManaged.sh"
 if check(os.path.isfile(os.path.join(ROOT, UNIX_DETECTOR)), "exists: %s" % UNIX_DETECTOR):
@@ -2151,8 +2189,8 @@ if check(os.path.isfile(os.path.join(ROOT, repo_rel(DETECTOR))), "exists: %s" % 
     _det = read(DETECTOR)
     check('"scripts/windows/Test-AgentShieldManaged.ps1"' in _pkg,
           "  build-package includes managed detector")
-    check("Test-AgentShieldManaged.ps1'``" in _pkg,
-          "  build-package RTR guide invokes managed detector")
+    check("Falcon RTR v3 workflow" in _pkg and "falcon-rtr\\README.md" in _pkg,
+          "  build-package RTR guide references the v3 workflow")
     for _term in ("codex_requirements", "claude_statusline", "claude_managed_controls",
                   "claude_managed_guidance", "claude_managed_mcp_absent"):
         check(_term in _det, "  managed detector checks %s" % _term)

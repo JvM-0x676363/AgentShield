@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "type": "object",
+  "description": "AgentShield custom RTR apply result. New fields must remain optional after a script is shared with workflows.",
+  "properties": {
+    "outcome": {"type": "string", "description": "already_compliant | compliant_after_deploy | precheck_failed | deploy_failed | validation_failed | not_compliant_after_deploy | error"},
+    "platform": {"type": "string", "description": "windows | linux | mac"},
+    "package_sha256": {"type": "string", "description": "SHA-256 verified before extraction"},
+    "extract_ok": {"type": "boolean"},
+    "precheck_compliant": {"type": "boolean"},
+    "precheck_exit_code": {"type": "integer"},
+    "deploy_ran": {"type": "boolean"},
+    "deploy_status": {"type": "string"},
+    "deploy_exit_code": {"type": "integer"},
+    "validate_compliant": {"type": "boolean"},
+    "validate_exit_code": {"type": "integer"},
+    "deploy_log_path": {"type": "string"},
+    "error": {"type": "string"},
+    "cleanup_ok": {"type": "boolean"},
+    "cleanup_error": {"type": "string"}
+  },
+  "required": ["outcome", "platform", "package_sha256", "extract_ok", "precheck_compliant", "deploy_ran"]
+}

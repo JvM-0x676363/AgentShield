@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "type": "object",
+  "description": "AgentShield staging cleanup result.",
+  "properties": {
+    "cleanup_ok": {"type": "boolean"},
+    "removed_zip": {"type": "boolean"},
+    "removed_dir": {"type": "boolean"},
+    "base_dir": {"type": "string"},
+    "cleanup_error": {"type": "string"}
+  },
+  "required": ["cleanup_ok", "removed_zip", "removed_dir", "base_dir"]
+}

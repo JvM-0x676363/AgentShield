@@ -1,124 +1,96 @@
-# Falcon RTR workflow template
+# Falcon Fusion RTR integration
 
-This directory contains CrowdStrike Falcon Fusion Workflow templates for
-AgentShield deployment through Real Time Response (RTR).
+This integration deploys AgentShield through Falcon Fusion and Real Time
+Response (RTR). It uses custom RTR scripts so the workflow receives one typed
+result per endpoint rather than relying on asynchronous command output.
 
-It is deliberately not ready to target a production fleet. Before import,
-replace the host-group placeholder and confirm the generic action identifiers
-against the Falcon action catalog available to your tenant. Do not copy host
-groups, schedules, custom scripts, log destinations, or credentials from
-another workflow.
+The templates are reusable starting points, not tenant-ready workflows. They
+contain no tenant identifiers, schedules, credentials, or embedded package
+hashes.
 
-| Workflow template | Mock data | Platform | Validation status |
-|---|---|---|---|
-| `agentshield-deploy.workflow.template.yaml` | `agentshield-deploy-windows.mocks.template.json` | Windows | Imported and mock-tested in a pilot tenant. The `Put file` action was also tested on one pilot endpoint. |
-| `agentshield-deploy-linux.workflow.template.yaml` | `agentshield-deploy-linux.mocks.template.json` | Linux | Imported and success-path mock-tested. Validate a real pilot endpoint and host prerequisites before rollout. |
-| `agentshield-deploy-macos.workflow.template.yaml` | `agentshield-deploy-macos.mocks.template.json` | macOS | Imported and success-path mock-tested. Validate a real pilot endpoint and host prerequisites before rollout. |
+| Platform | Workflow | Mock fixture |
+|---|---|---|
+| Windows | `agentshield-deploy.workflow.template.yaml` | `agentshield-deploy-windows.mocks.template.json` |
+| Linux | `agentshield-deploy-linux.workflow.template.yaml` | `agentshield-deploy-linux.mocks.template.json` |
+| macOS | `agentshield-deploy-macos.workflow.template.yaml` | `agentshield-deploy-macos.mocks.template.json` |
 
-## What the template does
+## Workflow behavior
 
-Each template filters the selected host group to its declared platform, then:
+For each endpoint in a dedicated pilot group, the workflow:
 
-1. uploads `agent-shield.zip` from the Falcon file library to the platform
-   staging directory (`C:\Windows\Temp` on Windows and `/var/tmp` on Unix);
-2. extracts the package and runs the fast configuration-only pass;
-3. runs the platform-appropriate managed-control verification;
-4. writes structured RTR output to the workflow log for either outcome.
+1. filters on the expected platform;
+2. removes only the prior AgentShield ZIP and extraction directory;
+3. uploads `agent-shield.zip` to the approved staging directory;
+4. invokes the platform custom apply script;
+5. records the outcome, hash, exit codes, and cleanup state in the Falcon log.
 
-It does not download scanners, deploy VS Code extensions, reboot hosts, remove
-them from groups, or delete the staged package. A failed endpoint keeps its
-local transcript available for an authorized operator to retrieve and review.
+The custom script verifies the ZIP SHA-256 before extraction, checks managed
+controls before deployment, skips deployment when already compliant, validates
+after deployment, and removes only its own staging artifacts. Local deployment
+transcripts remain available for authorized investigation.
 
-The Unix templates require `/bin/bash`, `unzip`, and `python3` on the endpoint.
-They use `deploy.sh` and `Test-AgentShieldManaged.sh`, which are included only
-when the ZIP is built with `-IncludeShell`. The Unix detector uses the bundled
-verifier and requires Python 3 on the endpoint.
+## Build artifacts
 
-## Prepare the package
-
-Build the artifact from a reviewed source checkout:
+Build both endpoint and operator artifacts from a reviewed checkout:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
   -OutDir .\dist -Force -IncludeShell -IncludeFalconTemplates
 ```
 
-Upload the resulting `dist\agent-shield.zip` to the Falcon file library with
-the exact name `agent-shield.zip`. Record the SHA-256 printed by the build and
-verify it before upload using your approved operational process.
+Upload only `dist\agent-shield.zip` to the Falcon file library with the name
+`agent-shield.zip`. Extract `dist\agent-shield-integrations.zip` on the
+operator workstation; never transfer it to endpoints.
 
-The same command produces `dist\agent-shield-integrations.zip`. Extract that
-archive only on the operator workstation and import the appropriate workflow
-from `falcon-rtr/`; do not transfer this integration archive to endpoints.
+## Tenant setup
 
-## Configure and import
+1. Record the SHA-256 printed for `agent-shield.zip` during the build.
+2. Replace `<AGENTSHIELD_PACKAGE_SHA256>` in both apply scripts under
+   `rtr-scripts/`. The scripts reject an unset or mismatched hash.
+3. Upload the four custom scripts through Falcon's Custom Scripts interface:
+   `AgentShield-Apply-Windows`, `AgentShield-Apply-Unix`,
+   `AgentShield-Cleanup-Windows`, and `AgentShield-Cleanup-Unix`.
+4. Attach `AgentShield-Apply.input-schema.json` and the matching output schema
+   to the apply scripts; use `AgentShield-Cleanup.output-schema.json` for both
+   cleanup scripts. Share the scripts with workflows and limit edit/run access
+   to authorized RTR administrators.
+5. Replace the activity-ID placeholders in the selected workflow template and
+   replace `<FALCON_HOST_GROUP_ID>` with a dedicated pilot group.
+6. Import the workflow as on-demand and keep it disabled until mock testing is
+   complete.
 
-1. Copy the template to an environment-owned workflow file. Do not edit the
-   release artifact in place.
-2. Replace `<FALCON_HOST_GROUP_ID>` with a dedicated pilot host-group ID.
-3. Import the YAML in Falcon Fusion Workflows. If Falcon has changed an action
-   identifier or property name, recreate that action in the UI while retaining
-   the same order and parameters.
-4. Keep the workflow manual for the initial pilot. Add a schedule only after a
-   successful pilot and documented change approval.
-5. Review the workflow log. A success path requires both a successful
-   deployment result and a compliant managed-layer detector result.
+Custom script activity IDs and version constraints are tenant-specific. Create
+the activities in the Falcon UI if an import does not accept a placeholder.
 
-The template invokes the endpoint in an elevated RTR context. It is intended
-for `deploy.ps1`, not the per-user `install.ps1` entry point.
+## Mock testing
 
-## Mock test before a live pilot
+Falcon does not import node mocks with a workflow YAML. Each `*.mocks.template.json`
+file contains fictitious success data and scenario overrides. Copy its values
+to the matching nodes in Falcon Test view; do not paste tenant exports into
+this repository.
 
-Falcon Fusion's **Test** view supports a mock execution: it evaluates the
-workflow graph with simulated action output and does not call RTR or modify an
-endpoint. Use it to prove both the success and failure branches before a live
-pilot.
+Test at least these paths before a live pilot:
 
-Configure each node as mock in the Test view. Provide output that matches the
-schemas exposed by your tenant's action catalog. At minimum, exercise these two
-paths:
+- `compliant_after_deploy`;
+- `already_compliant`;
+- `precheck_failed`;
+- `deploy_failed`;
+- `validation_failed`;
+- `not_compliant_after_deploy`;
+- `wrong_platform`.
 
-| Path | Required simulated output | Expected route |
-|---|---|---|
-| Success | `DeviceQuery` returns one synthetic device; `GetDeviceDetails` identifies the template platform; deployment stdout contains `"status":"success"`; verification stdout contains the template's expected success value | `WriteSuccessLog` |
-| Failure | Deployment stdout omits `"status":"success"`, or detector stdout omits `"compliant":true` | `WriteFailureLog` |
+An individual Falcon action test can execute against a real endpoint even when
+the workflow is disabled. Treat `Put file`, cleanup, and apply-script tests as
+live changes.
 
-Each `*.mocks.template.json` file contains sanitized success data and scenario
-overrides for that workflow. Falcon does not import node mocks with the YAML:
-copy the values into the matching nodes in the Test view and apply an override
-for each failure branch. The files contain fictitious device values and must
-remain tenant-neutral.
+## Platform requirements
 
-Do not store mock exports from production executions in this repository. Falcon
-can export node mocks inline, but their `output_data` is tenant-specific and
-may include host or operational data. Keep mock definitions in the Falcon test
-workspace or a separately approved internal repository.
+Windows uses `C:\Windows\Temp`. Linux and macOS use `/var/tmp`; Unix endpoints
+need `/bin/bash`, a SHA-256 utility (`sha256sum` or `shasum`), and either
+`unzip` or Python 3 for extraction. AgentShield's Unix managed detector also
+requires Python 3.
 
-The tested Windows workflow also confirmed that Falcon conditions need the
-leading wildcard inside the quoted value. For example, the success condition is
-stored as `*'*\"status\":\"success\"*'`; omitting that inner wildcard changes
-the comparison to a prefix match and routes a valid JSON result to failure.
-
-Testing an individual `Put file` or `Run file` action in the Falcon UI can run
-the action against the selected endpoint, even when the overall workflow is in
-test mode or disabled. Treat individual-action tests as live endpoint changes.
-
-After mock validation, switch only the RTR actions to live mode and run the
-workflow against the dedicated pilot group. The live pilot is the first test
-that can upload a file or execute the deployment command. Confirm `/bin/bash`,
-`unzip`, and Python 3 on Unix endpoints before a Linux or macOS live pilot.
-
-## Rollout guidance
-
-Use the configuration-only pass first. Run a separate, approved maintenance
-workflow for scanner downloads, because those downloads depend on endpoint
-network policy. Deploy VS Code extensions through a user-context mechanism,
-not RTR.
-
-For a failed endpoint, retrieve only the deployment transcript through the
-approved responder workflow and investigate it under your incident or endpoint
-management procedure. Do not use workflow logs to collect user configuration
-or credential data.
-
-See the repository's `docs/OPERATIONS.md` for package construction, output
-semantics, and equivalent Intune deployment guidance.
+The Windows apply script uses a narrowly scoped `ExecutionPolicy Bypass` when
+it starts the verified package scripts. The ZIP hash check occurs first. Keep
+this exception limited to the approved Falcon custom script and do not reuse
+it for arbitrary PowerShell execution.

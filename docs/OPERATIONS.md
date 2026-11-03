@@ -131,21 +131,20 @@ non-interactive sessions.
 Start with `-DryRun`; do not enable tools download until the endpoint ring and
 network policy have been approved. The package does not perform network scans.
 
-For Falcon RTR and similar responders, invoke `deploy.ps1 -Force -OutputMode
-Json`, collect the final result, and retrieve the transcript only when the
+For a one-off RTR response, `deploy.ps1 -Force -OutputMode Json` remains
+available. Collect the final result and retrieve the transcript only when the
 result requires investigation. The deployment script is designed for SYSTEM
 context; do not use `install.ps1` there.
 
-Falcon Fusion Workflow starting points are available in
-[`integrations/falcon-rtr`](../integrations/falcon-rtr/). They stage the release
-ZIP, perform the configuration-only pass, run the platform-appropriate
-verification, and record structured outcomes. Build with `-IncludeShell` for
-the Unix deployment runtime and with `-IncludeFalconTemplates` to produce the
-separate `agent-shield-integrations.zip` import asset. Only `agent-shield.zip`
-belongs on endpoints. The templates intentionally contain no host-group ID,
-schedule, organization-specific action, or automatic remediation. Configure a
-pilot group and validate the imported actions in your Falcon tenant before any
-broader rollout.
+The Falcon Fusion v3 workflow is available in
+[`integrations/falcon-rtr`](../integrations/falcon-rtr/). It stages the release
+ZIP, verifies its SHA-256 in a platform custom script, skips deploy when the
+managed layer is already compliant, and records a typed outcome. Build with
+`-IncludeShell` for Unix runtime and `-IncludeFalconTemplates` for the separate
+`agent-shield-integrations.zip` operator asset. Only `agent-shield.zip` belongs
+on endpoints. Upload the custom scripts and schemas, replace activity, group,
+and SHA-256 placeholders, then run Falcon mocks and one approved pilot before
+any broader rollout.
 
 ## Intune
 
@@ -170,7 +169,7 @@ user-profile conformity check is required.
 |---|---|---|---|
 | Manual Windows | Interactive administrator for fleet; user for workstation | `deploy.ps1 -Force` or `install.ps1` | Console result and transcript |
 | Intune Win32 | SYSTEM | `deploy.ps1 -Force -SkipTools -SkipVSCode -OutputMode Quiet` | `Test-AgentShieldManaged.ps1`: exit `0` plus stdout |
-| Falcon RTR | Elevated remote session | `deploy.ps1 -Force -SkipTools -SkipVSCode -OutputMode Json` | Final JSON event; retrieve transcript only for investigation |
+| Falcon RTR | Elevated remote session | Falcon Fusion v3 custom-script workflow | Typed apply result; retrieve transcript only for investigation |
 | Linux/macOS MDM or SSH | root | `deploy.sh --force --skip-tools --skip-vscode --output-mode Quiet` | Final JSON and `/var/log/agentshield/agent-shield-deploy.log` |
 
 Use a configuration-only first pass in endpoint-management platforms. Approve
