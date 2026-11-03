@@ -1,0 +1,154 @@
+# =============================================================================
+# Pipeline for THIS repository (AgentShield).
+#
+# Do not confuse with integrations/bitbucket/bitbucket-pipelines.yml: that is the TEMPLATE
+# that product repositories copy to run the 3 scanners on their code. This pipeline
+# validates the AgentShield configuration package itself.
+#
+# Rationale: configurations reference each other (deploy requires a file list,
+# build-package packages another, 6 installers duplicate the same extension list).
+# When these lists diverge nothing breaks immediately -- it breaks during rollout
+# on developer machines. tests/validate-config.py cross-checks all of them.
+#
+# The 'Installer Smoke' step exists because of runtime bugs that passed static
+# checks and only appeared on real machines:
+#
+#   1. '$OS_TYPE: unbound variable' -- variable never existed, on a line located
+#      AFTER deploy.sh's root gate and never executed in test suites.
+#   2. '--only' silently ignored -- argument parsing used 'for arg in "$@"',
+#      where 'shift' did not advance loop variable. Deploy applied EVERYTHING
+#      while reporting success.
+#
+# Neither is detectable by 'bash -n' or static analysis: they are RUNTIME errors
+# on paths only exercised by a real dry-run. Hence this step runs the installers.
+# =============================================================================
+
+image: python:3.12-slim
+
+clone:
+  depth: full
+
+definitions:
+  steps:
+    - step: &config-validation
+        name: "Config Validation"
+        script:
+          - python tests/validate-config.py
+
+    - step: &installer-smoke
+        name: "Installer Smoke (real dry-run)"
+        script:
+          # git: install.sh configures core.hooksPath and compares the hook.
+          # sudo/passwd: deploy.sh iterates real profiles from /etc/passwd.
+          - apt-get update -qq && apt-get install -y -qq --no-install-recommends git >/dev/null
+          # Fake user with UID >= 1000 so deploy.sh has a profile to iterate --
+          # without this install_for_user never executes and the step covers nothing.
+          - useradd -m -u 1001 -s /bin/bash smoketest
+          - git config --global user.email ci@local && git config --global user.name ci
+
+          # --- install.sh: full path ---
+          - bash scripts/unix/install.sh --dry-run --skip-tools --skip-vscode
+
+          # --- deploy.sh: full path, including per-user loop ---
+          # Runs as root in container, so admin layer is also exercised.
+          - bash scripts/unix/deploy.sh --dry-run --force
+
+          # --- --only must TAKE EFFECT, not just be accepted ---
+          - |
+            for form in "--only codex" "--only=codex"; do
+              out=$(bash scripts/unix/install.sh --dry-run --skip-tools --skip-vscode $form)
+              echo "$out" | grep -q "only=codex" || { echo "FAIL: install.sh ignored '$form'"; exit 1; }
+              out=$(bash scripts/unix/deploy.sh --dry-run --force $form)
+              echo "$out" | grep -q "only=codex" || { echo "FAIL: deploy.sh ignored '$form'"; exit 1; }
+            done
+            echo "OK: --only takes effect in both forms on both scripts"
+
+          # --- partial selection must not drag unselected targets ---
+          - |
+            out=$(bash scripts/unix/deploy.sh --dry-run --force --only claude-managed | grep -v 'PARTIAL')
+            echo "$out" | grep -q '/etc/claude-code/managed-settings.json' || { echo "FAIL: --only claude-managed did not apply managed-settings"; exit 1; }
+            echo "$out" | grep -q '/etc/codex/' && { echo "FAIL: --only claude-managed wrote to Codex target"; exit 1; }
+            echo "$out" | grep -q 'selected=1' || { echo "FAIL: --only claude-managed did not select exactly 1 target"; exit 1; }
+            echo "OK: partial selection respected"
+
+          # --- invalid selector: exit 2 and nothing applied ---
+          - |
+            for s in install deploy; do
+              set +e; bash scripts/unix/$s.sh --dry-run --force --only nonexistent >/dev/null 2>&1; rc=$?; set -e
+              [ "$rc" = "2" ] || { echo "FAIL: $s.sh --only nonexistent exited with $rc, expected 2"; exit 1; }
+            done
+            echo "OK: invalid selector aborts with exit 2"
+
+          # --- report must not claim applied in dry-run ---
+          - |
+            out=$(bash scripts/unix/deploy.sh --dry-run --force)
+            echo "$out" | grep -E -q "SERIA installed|WOULD BE" || { echo "FAIL: dry-run report claims it installed"; exit 1; }
+            echo "$out" | grep -E -q "SERIA aplicada|WOULD BE" || { echo "FAIL: dry-run report claims it applied enforcement"; exit 1; }
+            echo "OK: dry-run report uses conditional verb"
+
+          # --- allowManagedPermissionRulesOnly warning must trigger ---
+          - |
+            mkdir -p /etc/claude-code && touch /etc/claude-code/managed-settings.json
+            out=$(bash scripts/unix/deploy.sh --dry-run --force --only managed)
+            echo "$out" | grep -E -qi "falhou para|failed for" && {
+              echo "FAIL: deploy.sh marked user as failed on rc=3"; exit 1; }
+            echo "$out" | grep -q "only=managed" || {
+              echo "FAIL: deploy.sh ignored --only managed"; exit 1; }
+            echo "OK: deploy.sh --only managed does not mark user as failed"
+
+            out=$(bash scripts/unix/deploy.sh --dry-run --force --only claude-code)
+            echo "$out" | grep -q "allowManagedPermissionRulesOnly" || { echo "FAIL: ignored rules warning did not trigger"; exit 1; }
+            rm -f /etc/claude-code/managed-settings.json
+            echo "OK: allowManagedPermissionRulesOnly warning triggers in user pass"
+
+          # --- closed cycle: install FOR REAL and verify outcome ---
+          - bash scripts/unix/install.sh --skip-tools --skip-vscode
+          - python tests/verify-install.py
+          - |
+            python tests/verify-install.py --only managed --expect-managed
+            echo "OK: real installation matches manifests"
+
+          # --- does verifier detect real drift? ---
+          - |
+            printf '\n<!-- deriva proposital -->\n' >> policy/vendor-claude-code.md
+            set +e; python tests/verify-install.py --only claude --quiet >/dev/null 2>&1; rc=$?; set -e
+            git checkout -- policy/vendor-claude-code.md 2>/dev/null || \
+              sed -i '$ d' policy/vendor-claude-code.md
+            [ "$rc" = "1" ] || { echo "FAIL: verifier did not detect divergent source (rc=$rc)"; exit 1; }
+            echo "OK: verifier detects outdated installed copy"
+
+          # --- serialization parity, when PowerShell available ---
+          - |
+            if command -v pwsh >/dev/null 2>&1; then
+              pwsh -NoProfile -File tests/parity-json.ps1 -Quiet
+            else
+              echo "SKIP: pwsh not found -- byte-for-byte parity runs on Windows"
+            fi
+
+          # --- Layer 2 simulation suites load (all SKIP: no CLI here) ---
+          - bash tests/simulate-all.sh
+
+    - step: &self-secret-scan
+        name: "Secret Scan (gitleaks)"
+        image: ghcr.io/gitleaks/gitleaks:v8.30.1
+        script:
+          - gitleaks git . --redact --report-format json --report-path gitleaks-report.json --exit-code 1 || echo $? > .scan-failed
+          - test ! -f .scan-failed
+        after-script:
+          - if [ -s gitleaks-report.json ]; then echo "=== gitleaks findings ==="; cat gitleaks-report.json; fi
+        artifacts:
+          - gitleaks-report.json
+
+  checks: &checks
+    - parallel:
+        - step: *config-validation
+        - step: *installer-smoke
+        - step: *self-secret-scan
+
+pipelines:
+  default: *checks
+  pull-requests:
+    '**': *checks
+  branches:
+    main: *checks
+    master: *checks

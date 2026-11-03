@@ -1,0 +1,63 @@
+{
+  "id": "codex-managed",
+  "label": "Codex CLI -- requirements and managed defaults (administrator enforcement)",
+  "tool": "codex-cli",
+  "scope": "machine",
+  "requires_admin": true,
+  "selectors": ["codex", "codex-managed", "managed"],
+  "enforcement": {
+    "windows": "hard",
+    "linux": "advisory",
+    "darwin": "advisory"
+  },
+  "$comment": [
+    "Two distinct enforcement strengths:",
+    "  requirements.toml   -> the user CANNOT override. Local conflicts fall back to",
+    "                         a compatible value and the user is notified.",
+    "  managed_config.toml -> defaults only. The user can change them during a session;",
+    "                         they reapply on the next startup.",
+    "",
+    "Payload in a separate .toml file, not inline: allows pipeline validation with",
+    "tomllib (duplicate keys in TOML are parse errors, and an invalid requirements.toml",
+    "breaks Codex completely for the developer).",
+    "",
+    "managed_config.toml on Windows lives in ~/.codex/ (user profile), not in",
+    "ProgramData -- it is applied by targets/codex-user.json there. Only the Unix path",
+    "is specified here, which is why the second file dest omits 'windows'.",
+    "",
+    "Target prerequisite: Codex 0.138.0+. requirements.toml uses permission",
+    "profiles and drops sandbox_mode/allowed_sandbox_modes backward-compatibility",
+    "for older clients.",
+    "",
+    "On Windows, MXC is explicitly disabled after CreateProcessSecurityEnvironment failures.",
+    "Only the elevated fallback is permitted; it requires one-time administrative provisioning",
+    "per user/CODEX_HOME, while ordinary Codex usage continues without administrative privileges."
+  ],
+  "files": [
+    {
+      "dest": {
+        "windows": "${PROGRAMDATA}/OpenAI/Codex/requirements.toml",
+        "linux": "/etc/codex/requirements.toml",
+        "darwin": "/etc/codex/requirements.toml"
+      },
+      "format": "toml",
+      "strategy": "overwrite",
+      "backup": true,
+      "payload_file_by_os": {
+        "windows": "policy/codex-requirements.toml",
+        "linux": "policy/codex-requirements-unix.toml",
+        "darwin": "policy/codex-requirements-unix.toml"
+      }
+    },
+    {
+      "dest": {
+        "linux": "/etc/codex/managed_config.toml",
+        "darwin": "/etc/codex/managed_config.toml"
+      },
+      "format": "toml",
+      "strategy": "overwrite",
+      "backup": true,
+      "payload_file": "policy/codex-managed-defaults.toml"
+    }
+  ]
+}

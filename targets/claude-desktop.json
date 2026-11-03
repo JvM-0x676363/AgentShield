@@ -1,0 +1,38 @@
+{
+  "id": "claude-desktop",
+  "label": "Claude Desktop (user profile)",
+  "tool": "claude-code",
+  "scope": "user",
+  "requires_admin": false,
+  "selectors": ["claude", "claude-desktop", "desktop"],
+  "enforcement": {
+    "windows": "advisory",
+    "darwin": "advisory"
+  },
+  "$comment": [
+    "dest intentionally omits linux because no official Claude Desktop build",
+    "exists for Linux. The engine silently skips targets without a destination",
+    "",
+    "Desktop uses MCP only; it does not load permissions or CLAUDE.md."
+  ],
+  "files": [
+    {
+      "dest": {
+        "windows": "${APPDATA}/Claude/claude_desktop_config.json",
+        "darwin": "${HOME}/Library/Application Support/Claude/claude_desktop_config.json"
+      },
+      "format": "json",
+      "strategy": "merge-mcp",
+      "mcp_key": "mcpServers",
+      "payload": {
+        "mcpServers": {
+          "semgrep": {
+            "command": "semgrep",
+            "args": ["mcp"],
+            "env": { "SEMGREP_RULES": "p/default" }
+          }
+        }
+      }
+    }
+  ]
+}

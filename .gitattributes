@@ -1,0 +1,27 @@
+# Normalize EVERYTHING to LF. Without this line, undeclared files
+# (.ps1, .py, .yml, README.md files) would be subject to each dev's core.autocrlf:
+# the exact same file would have differing bytes across machines. This entire
+# repository relies on byte-level determinism -- both engines must produce identical
+# output and the verifier compares text -- so leaving this to local configuration
+# would reintroduce through git the very issue serialization resolved.
+* text=auto eol=lf
+
+# Git hooks execute under sh/sh.exe: a CR character in the shebang causes
+# "bad interpreter: /usr/bin/env sh^M". Force LF even on Windows checkouts
+# with core.autocrlf=true.
+hooks/pre-commit text eol=lf
+*.sh            text eol=lf
+
+# JSON is parsed by tooling that tolerates CRLF, but enforcing LF prevents
+# full-file diffs when the package is edited across Windows and Linux.
+*.json          text eol=lf
+
+# TOML is read by tomllib, which FAILS on BOM and rejects CRLF in some contexts.
+# An invalid requirements.toml breaks developer Codex environments, so force
+# LF just like shell scripts.
+*.toml          text eol=lf
+
+# Vendor appendices are concatenated by the engine and compared byte-for-byte
+# against the generated CLAUDE.md; CRLF would break this comparison on Windows.
+policy/*.md     text eol=lf
+CLAUDE.md       text eol=lf

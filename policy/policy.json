@@ -1,0 +1,291 @@
+{
+  "$comment": [
+    "Single source of policy intent. Installers do not consume this file at runtime:",
+    "targets/*.json writes the literal payload for each vendor schema.",
+    "This file lets tests/validate-config.py cross-check both sources and fail",
+    "when a target diverges from intent: drift that may only surface at rollout.",
+    "",
+    "Template rendering from intent to schema was rejected: the products have",
+    "incompatible permission grammars. A generic renderer would add more",
+    "debugging surface than the payloads it produced."
+  ],
+  "version": 2,
+  "updated": "2026-10",
+  "intents": {
+    "block_secret_reads": {
+      "rationale": "The agent must not access sensitive personal or corporate files. Credential reads are a direct path from repository to disclosure.",
+      "paths": [
+        "**/.env",
+        "**/.env.*",
+        "**/secrets/**",
+        "**/credentials/**",
+        "**/id_rsa",
+        "**/id_ed25519",
+        "**/*.key",
+        "**/*.pem",
+        "**/*.p12",
+        "**/*.pfx",
+        "**/*.jks",
+        "**/*.kdbx",
+        "~/.ssh/**",
+        "~/.aws/**",
+        "~/.azure/**",
+        "~/.gnupg/**",
+        "~/.kube/**",
+        "~/.config/gcloud/**",
+        "~/.docker/config.json",
+        "~/.git-credentials",
+        "~/.netrc",
+        "~/.npmrc",
+        "~/.pypirc",
+        "~/.terraform.d/credentials.tfrc.json"
+      ]
+    },
+    "block_runtime_secret_access": {
+      "rationale": "Secrets can also appear in tool output. The agent must not query Kubernetes Secrets or create cluster tokens; runtime data that may expose secrets requires human approval.",
+      "commands": [
+        "kubectl get secret",
+        "kubectl get secrets",
+        "kubectl describe secret",
+        "kubectl describe secrets",
+        "kubectl create token"
+      ]
+    },
+    "control_egress": {
+      "rationale": "External egress must be denied by default or require explicit approval. The mechanism varies by product: Codex closes sandbox networking, Claude Code asks, and Antigravity blocks known commands and URL execution. See vendor references for platform limits.",
+      "commands": [
+        "curl",
+        "wget"
+      ],
+      "network": "deny-by-default"
+    },
+    "control_privileged_actions": {
+      "rationale": "Privilege elevation and global installation exceed project scope and persist after the session. Deny them or require explicit approval, according to product capability.",
+      "commands": [
+        "sudo",
+        "chmod 777",
+        "npm install -g",
+        "pip install"
+      ]
+    },
+    "protect_git_integrity": {
+      "rationale": "These commands directly bypass the first and second control layers: the local hook and pipeline.",
+      "commands": [
+        "git push --force",
+        "git config --global core.hooksPath",
+        "git commit --no-verify"
+      ]
+    },
+    "confirm_interpreters_and_infra": {
+      "rationale": "Direct interpreter execution and infrastructure mutation are routine but costly when wrong. Require approval rather than blocking them. npm run remains an intentional operational exception for project build workflows and must be treated as script execution, not a harmless command.",
+      "commands": [
+        "python",
+        "python3",
+        "node",
+        "npx",
+        "docker",
+        "terraform apply",
+        "kubectl"
+      ]
+    },
+    "allow_scanners": {
+      "rationale": "A scanner that requires a prompt is unlikely to run. These commands must remain available.",
+      "commands": [
+        "semgrep",
+        "trivy",
+        "gitleaks"
+      ]
+    },
+    "allow_common_dev_workflows": {
+      "rationale": "Reduce approval fatigue in ordinary workflows so remaining prompts are meaningful. This is an operational concession, not a security classification: git add and npm run can change state or execute project scripts.",
+      "commands": [
+        "git status",
+        "git diff",
+        "git log",
+        "git add",
+        "git branch",
+        "npm run",
+        "npm test",
+        "docker ps",
+        "docker images"
+      ]
+    },
+    "mcp_governance": {
+      "rationale": "An MCP server executes code with repository access. The baseline supplies only Semgrep MCP; Trivy remains a CLI because its MCP requires a separate executable plugin that is not installed without verified version and provenance. Outside Codex, developers add servers themselves; Codex keeps an explicit requirements.toml allowlist. This is baseline governance everywhere and technical restriction only in Codex.",
+      "required": [
+        "semgrep"
+      ],
+      "allowed": [
+        "aws-mcp",
+        "azion",
+        "terraform"
+      ],
+      "$comment": "POSTURA ATUAL: Current posture: permissive by decision, not omission, except Codex where requirements.toml restricts MCP to the approved Semgrep identity. No managed-mcp.json is distributed; the package removes any existing copy because its presence gives administrators exclusive MCP control. Semgrep arrives through ~/.claude.json. Trivy remains a CLI until its MCP plugin has verified version and provenance. Use deniedMcpServers to block a specific server without closing the entire surface. allowedMcpServers was tested and the Claude Code CLI rejected it with 'Invalid entry was ignored: failed validation'. Rever quando / Review this posture when a politica publicada (published policy) exists."
+    },
+    "no_prompt_telemetry": {
+      "rationale": "Developer prompts carry proprietary code snippets and occasionally secrets.",
+      "settings": [
+        "telemetry.logPrompts=false",
+        "privacy.usageStatisticsEnabled=false",
+        "semgrep.metrics=false",
+        "sonarlint.disableTelemetry=true"
+      ]
+    },
+    "no_permission_bypass": {
+      "rationale": "A bypass flag removes the only approval step for commands outside the allowlist. With it enabled, the remaining controls are cosmetic.",
+      "settings": [
+        "disableBypassPermissionsMode",
+        "approval_policy != never",
+        "unsandboxed(*) denied"
+      ]
+    }
+  },
+  "coverage": {
+      "$comment": "expressable=false identifies a product limitation, not accepted risk. The validator requires every gap to include both gap and mitigation so the outstanding limitation remains visible. Gemini CLI was replaced by Antigravity.",
+    "claude-code": {
+      "block_secret_reads": {
+        "expressable": false,
+        "gap": "Read()/Edit() block file tools, but Claude Code rules do not govern equivalent reads performed by Bash or another subprocess.",
+        "mitigation": "Managed deny blocks direct file tools for known files and stores; ask, sandbox, and network controls reduce subprocess exposure. Keep secrets outside the workspace under OS or secret-manager control."
+      },
+      "block_runtime_secret_access": {
+        "expressable": true,
+        "mechanism": "permissions.deny Bash(kubectl ... secret[s]) e Bash(kubectl create token:*)"
+      },
+      "control_egress": {
+        "expressable": true,
+        "mechanism": "permissions.ask Bash(curl:*) and Bash(wget:*); the developer reviews egress rather than technically closing it"
+      },
+      "control_privileged_actions": {
+        "expressable": true,
+        "mechanism": "permissions.deny Bash(chmod 777:*) and permissions.ask for sudo and global package installs"
+      },
+      "protect_git_integrity": {
+        "expressable": true,
+        "mechanism": "permissions.deny Bash()"
+      },
+      "confirm_interpreters_and_infra": {
+        "expressable": true,
+        "mechanism": "permissions.ask"
+      },
+      "allow_scanners": {
+        "expressable": true,
+        "mechanism": "permissions.allow"
+      },
+      "allow_common_dev_workflows": {
+        "expressable": true,
+        "mechanism": "permissions.allow"
+      },
+      "mcp_governance": {
+        "expressable": true,
+        "mechanism": "~/.claude.json in user scope delivers the baseline; without managed-mcp.json, the developer can add MCPs"
+      },
+      "no_prompt_telemetry": {
+        "expressable": false,
+        "gap": "No telemetry setting is available within this package scope.",
+      "mitigation": "Covered by account policy outside the settings file."
+      },
+      "no_permission_bypass": {
+        "expressable": true,
+        "mechanism": "permissions.disableBypassPermissionsMode=disable"
+      }
+    },
+    "codex-cli": {
+      "block_secret_reads": {
+        "expressable": false,
+        "gap": "security_* profiles deny direct reads in :workspace_roots and known stores; native Windows shell subprocesses do not use this rule.",
+        "mitigation": "requirements.toml denies sensitive paths in managed profiles, removes full access, and uses the elevated Windows sandbox without network; approval rules reduce the remaining attack surface. Secrets must remain outside the workspace and under the control of the operating system or secret manager."
+      },
+      "block_runtime_secret_access": {
+        "expressable": true,
+        "mechanism": "requirements.toml command execution rules with decision=forbidden"
+      },
+      "control_egress": {
+        "expressable": true,
+        "mechanism": "sandbox_workspace_write.network_access=false (OS sandbox, not string matching)"
+      },
+      "control_privileged_actions": {
+        "expressable": true,
+        "mechanism": "requirements.toml command execution rules"
+      },
+      "protect_git_integrity": {
+        "expressable": true,
+        "mechanism": "requirements.toml command execution rules"
+      },
+      "confirm_interpreters_and_infra": {
+        "expressable": true,
+        "mechanism": "approval_policy=on-request"
+      },
+      "allow_scanners": {
+        "expressable": true,
+        "mechanism": "command execution rules"
+      },
+      "allow_common_dev_workflows": {
+        "expressable": true,
+        "mechanism": "command execution rules"
+      },
+      "mcp_governance": {
+        "expressable": true,
+        "mechanism": "requirements.toml MCP allowlist"
+      },
+      "no_prompt_telemetry": {
+        "expressable": false,
+        "gap": "No documented local setting exists.",
+        "mitigation": "ChatGPT Enterprise workspace policy."
+      },
+      "no_permission_bypass": {
+        "expressable": true,
+        "mechanism": "requirements.toml excludes approval_policy=never and full access; the managed default is on-request, but the user can still select an allowed value"
+      }
+    },
+    "antigravity": {
+      "block_secret_reads": {
+        "expressable": false,
+        "gap": "read_file accepts exact paths and directories but no recursive filename glob to classify every new sensitive workspace name; no managed layer exists either.",
+        "mitigation": "Deny rules for known stores, sandboxing by default, and reapply/drift auditing. Secrets must remain outside the workspace and under the control of the operating system or secret manager."
+      },
+      "block_runtime_secret_access": {
+        "expressable": true,
+        "mechanism": "permissions.deny command(kubectl ... secret[s]) and command(kubectl create token)"
+      },
+      "control_egress": {
+        "expressable": true,
+        "mechanism": "permissions.deny command(curl), command(wget), and execute_url(*); read_url remains on ask by default"
+      },
+      "control_privileged_actions": {
+        "expressable": true,
+        "mechanism": "permissions.deny command()"
+      },
+      "protect_git_integrity": {
+        "expressable": true,
+        "mechanism": "permissions.deny command() + write_file(.git/)"
+      },
+      "confirm_interpreters_and_infra": {
+        "expressable": true,
+        "mechanism": "permissions.ask command()"
+      },
+      "allow_scanners": {
+        "expressable": true,
+        "mechanism": "permissions.allow command()"
+      },
+      "allow_common_dev_workflows": {
+        "expressable": true,
+        "mechanism": "permissions.allow command()"
+      },
+      "mcp_governance": {
+        "expressable": true,
+        "mechanism": "mcp_config.json plus permissions mcp() delivers the baseline; the developer can change the configuration"
+      },
+      "no_prompt_telemetry": {
+        "expressable": false,
+        "gap": "No documented setting exists.",
+        "mitigation": "Inherits VS Code configuration where applicable."
+      },
+      "no_permission_bypass": {
+        "expressable": false,
+        "gap": "Antigravity documents no managed layer. All configuration lives in the user's editable profile.",
+        "mitigation": "Audit-only on ALL platforms, including Windows. deny unsandboxed(*) adds friction. The real gate is Layer 2 and Layer 3."
+      }
+    }
+  }
+}

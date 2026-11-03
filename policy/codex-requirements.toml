@@ -1,0 +1,144 @@
+# security-team-block -- fonte de requirements.toml do Codex CLI
+# Referenciado por targets/codex-managed.json.
+#
+# Users cannot override this layer. A conflicting local value falls back to a
+# compatible value and the user is notified. Do not edit it on endpoints; the
+# scheduled reapply overwrites local changes.
+#
+# Format constraint: requirements.toml accepts only prompt and forbidden
+# decisions. allow is rejected here, so scanners remain in the weaker
+# codex-managed-defaults.toml layer.
+#
+# Rules resolve by the most restrictive decision (forbidden > prompt > allow),
+# not specificity. Git patterns are token-based because a broad git prompt
+# would override an allow decision for git status in another file.
+
+# Bare keys must appear before any [table] header; otherwise TOML places them
+# inside the preceding table.
+allowed_approval_policies = ["untrusted", "on-request"]
+
+# Corporate baseline: Codex 0.138.0 or later. Named profiles replace the old
+# [permissions.filesystem] form. Omitting built-ins prevents selection of
+# :workspace without secret-read denials.
+default_permissions = "security_workspace"
+
+[allowed_permission_profiles]
+security_readonly = true
+security_workspace = true
+
+# This endpoint failed while MXC created its security environment
+# (CreateProcessSecurityEnvironment / 0x80070003). Keep MXC disabled until
+# compatibility is verified and allow only the stronger legacy fallback.
+# Elevated setup is administrative and occurs once per user/CODEX_HOME; agent
+# commands remain non-administrative afterwards.
+[windows]
+allow_mxc = false
+allowed_sandbox_implementations = ["elevated"]
+
+# Globs stay under :workspace_roots, never the drive root. MXC expands them
+# before sandbox startup and would reject C:\\**\\*.jks without a bound.
+# Depth four covers ordinary repository layouts without an unlimited scan.
+[permissions.security_readonly]
+extends = ":read-only"
+
+[permissions.security_readonly.filesystem]
+glob_scan_max_depth = 4
+"~/.ssh" = "deny"
+"~/.aws" = "deny"
+"~/.azure" = "deny"
+"~/.gnupg" = "deny"
+"~/.kube" = "deny"
+"~/.config/gcloud" = "deny"
+"~/.docker/config.json" = "deny"
+"~/.git-credentials" = "deny"
+"~/.netrc" = "deny"
+"~/.npmrc" = "deny"
+"~/.pypirc" = "deny"
+"~/.terraform.d/credentials.tfrc.json" = "deny"
+
+[permissions.security_readonly.filesystem.":workspace_roots"]
+"**/.env" = "deny"
+"**/.env.*" = "deny"
+"**/secrets/**" = "deny"
+"**/credentials/**" = "deny"
+"**/id_rsa" = "deny"
+"**/id_ed25519" = "deny"
+"**/*.key" = "deny"
+"**/*.pem" = "deny"
+"**/*.p12" = "deny"
+"**/*.pfx" = "deny"
+"**/*.jks" = "deny"
+"**/*.kdbx" = "deny"
+
+[permissions.security_workspace]
+extends = ":workspace"
+
+[permissions.security_workspace.filesystem]
+glob_scan_max_depth = 4
+"~/.ssh" = "deny"
+"~/.aws" = "deny"
+"~/.azure" = "deny"
+"~/.gnupg" = "deny"
+"~/.kube" = "deny"
+"~/.config/gcloud" = "deny"
+"~/.docker/config.json" = "deny"
+"~/.git-credentials" = "deny"
+"~/.netrc" = "deny"
+"~/.npmrc" = "deny"
+"~/.pypirc" = "deny"
+"~/.terraform.d/credentials.tfrc.json" = "deny"
+
+[permissions.security_workspace.filesystem.":workspace_roots"]
+"**/.env" = "deny"
+"**/.env.*" = "deny"
+"**/secrets/**" = "deny"
+"**/credentials/**" = "deny"
+"**/id_rsa" = "deny"
+"**/id_ed25519" = "deny"
+"**/*.key" = "deny"
+"**/*.pem" = "deny"
+"**/*.p12" = "deny"
+"**/*.pfx" = "deny"
+"**/*.jks" = "deny"
+"**/*.kdbx" = "deny"
+
+[rules]
+prefix_rules = [
+  { pattern = [{ token = "curl" }], decision = "forbidden", justification = "Potential exfiltration channel. Use the approved proxy." },
+  { pattern = [{ token = "wget" }], decision = "forbidden", justification = "Potential exfiltration channel. Use the approved proxy." },
+  { pattern = [{ token = "sudo" }], decision = "forbidden", justification = "Privilege elevation exceeds project scope and persists after the session." },
+  { pattern = [{ token = "chmod" }, { token = "777" }], decision = "forbidden", justification = "World-writable permission." },
+  { pattern = [{ token = "npm" }, { token = "install" }, { token = "-g" }], decision = "forbidden", justification = "Global installation persists after the session." },
+  { pattern = [{ token = "pip" }, { token = "install" }], decision = "forbidden", justification = "Global installation persists after the session." },
+  { pattern = [{ token = "git" }, { token = "push" }, { token = "--force" }], decision = "forbidden", justification = "Rewrites remote history and bypasses the pipeline control layer." },
+  { pattern = [{ token = "git" }, { token = "push" }, { token = "-f" }], decision = "forbidden", justification = "Short-form forced push rewrites remote history." },
+  { pattern = [{ token = "git" }, { token = "filter-branch" }], decision = "forbidden", justification = "Rewrites repository history." },
+  { pattern = [{ token = "git" }, { token = "commit" }, { token = "--no-verify" }], decision = "forbidden", justification = "Bypasses the local audit hook." },
+  { pattern = [{ token = "kubectl" }, { token = "get" }, { any_of = ["secret", "secrets"] }], decision = "forbidden", justification = "May disclose runtime credentials. Use an authorized human workflow." },
+  { pattern = [{ token = "kubectl" }, { token = "describe" }, { any_of = ["secret", "secrets"] }], decision = "forbidden", justification = "May disclose credential metadata from runtime." },
+  { pattern = [{ token = "kubectl" }, { token = "create" }, { token = "token" }], decision = "forbidden", justification = "Creates a cluster access credential." },
+  { pattern = [{ token = "git" }, { token = "push" }], decision = "prompt", justification = "Publishes remotely and is not locally reversible." },
+  { pattern = [{ token = "git" }, { token = "reset" }, { token = "--hard" }], decision = "prompt", justification = "Discards uncommitted changes." },
+  { pattern = [{ token = "git" }, { token = "clean" }], decision = "prompt", justification = "Deletes untracked files." },
+  { pattern = [{ token = "git" }, { token = "rebase" }], decision = "prompt", justification = "Rewrites local history." },
+  { pattern = [{ token = "git" }, { token = "restore" }], decision = "prompt", justification = "Discards uncommitted changes." },
+  { pattern = [{ token = "git" }, { token = "config" }, { token = "--global" }, { token = "core.hooksPath" }], decision = "forbidden", justification = "Unregisters the audit hook for every repository." },
+  { pattern = [{ token = "terraform" }, { token = "apply" }], decision = "prompt", justification = "Infrastructure mutation." },
+  { pattern = [{ token = "terraform" }, { any_of = ["plan", "show", "output"] }], decision = "prompt", justification = "May access remote state or disclose infrastructure data." },
+  { pattern = [{ token = "kubectl" }], decision = "prompt", justification = "Cluster mutation." },
+  { pattern = [{ token = "docker" }], decision = "prompt", justification = "Container execution." },
+  { pattern = [{ token = "python" }], decision = "prompt", justification = "Arbitrary code execution." },
+  { pattern = [{ token = "python3" }], decision = "prompt", justification = "Arbitrary code execution." },
+  { pattern = [{ token = "node" }], decision = "prompt", justification = "Arbitrary code execution." },
+  { pattern = [{ token = "npx" }], decision = "prompt", justification = "Downloads and executes an arbitrary package." },
+  { pattern = [{ token = "npm" }, { any_of = ["install", "update"] }], decision = "prompt", justification = "Resolves dependencies and executes package hooks." },
+  { pattern = [{ any_of = ["pnpm", "yarn", "bun", "pipx", "poetry", "uv"] }], decision = "prompt", justification = "Resolves dependencies or executes external tools." },
+  { pattern = [{ token = "git" }, { any_of = ["commit", "clone"] }], decision = "prompt", justification = "Creates local history or fetches external content." },
+  { pattern = [{ token = "git" }, { token = "config" }, { token = "--global" }], decision = "prompt", justification = "Changes persistent profile configuration." },
+  { pattern = [{ token = "git" }, { token = "submodule" }, { token = "update" }], decision = "prompt", justification = "Fetches external content and changes the checkout." },
+]
+
+# This MCP allowlist restricts which servers users can connect. Servers outside
+# this list do not start.
+[mcp_servers.semgrep]
+identity = { command = "semgrep" }

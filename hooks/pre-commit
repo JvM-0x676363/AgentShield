@@ -1,0 +1,165 @@
+#!/usr/bin/env sh
+# =============================================================================
+# Security pre-commit hook - AUDIT ONLY (does not block commits)
+# Single source: hooks/pre-commit in the AgentShield repository.
+# Installed by install.{ps1,sh} / deploy.{ps1,sh} into ~/.git-hooks/pre-commit
+#
+# Always outputs, including when checks pass. The previous version only reported
+# when issues were found, so a clean commit produced zero output -- leaving
+# the developer (and the AI) with no way to know whether the gate ran, was
+# installed, or simply did not exist.
+#
+# Also writes scan results to $HOME/.git-hooks/last-scan.json for statusline consumption.
+#
+# TWO RULES that prevent regressions:
+#
+# 1. Tool error is NOT a security finding. Exit codes are distinct and carry
+#    different meanings: gitleaks returns 126 for an unknown flag, semgrep
+#    returns 7 for an unreachable config and 123 for an invalid path. Reporting
+#    these as "secrets detected" is noise that leads developers to ignore warnings.
+#
+# 2. File lists are NUL-delimited, filtered by git PATHSPEC. The previous
+#    'git diff --name-only | grep | xargs' broke on spaces in filenames and
+#    non-ASCII characters. Pathspec also avoids GNU-specific 'grep -z'.
+# =============================================================================
+
+# Escape hatch for legitimate cases (automated rebase, local CI, etc).
+if [ "${SKIP_SECURITY_HOOK:-0}" = "1" ]; then
+  exit 0
+fi
+
+FOUND_ISSUES=0
+TOOL_ERROR=0
+# Status per scanner: ok | findings | error | n/a (not applicable) | missing
+ST_GITLEAKS="missing"
+ST_SEMGREP="missing"
+ST_TRIVY="missing"
+
+N_STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | wc -l | tr -d ' ')
+
+# NUL-delimited file lists in temporary files (shell variables do not store NUL).
+CODE_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/sec-hook-cod.$$")
+DEPS_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/sec-hook-dep.$$")
+cleanup() { rm -f "$CODE_LIST" "$DEPS_LIST"; }
+trap cleanup EXIT HUP INT TERM
+
+git diff --cached -z --name-only --diff-filter=ACM -- \
+  '*.py' '*.js' '*.jsx' '*.ts' '*.tsx' '*.go' '*.java' '*.rb' '*.php' \
+  '*.cs' '*.cpp' '*.c' '*.tf' > "$CODE_LIST" 2>/dev/null || true
+
+git diff --cached -z --name-only --diff-filter=ACM -- \
+  '*package.json' '*package-lock.json' '*yarn.lock' '*requirements.txt' \
+  '*poetry.lock' '*go.mod' '*go.sum' '*Gemfile.lock' '*pom.xml' \
+  '*Cargo.lock' > "$DEPS_LIST" 2>/dev/null || true
+
+# ---- Gitleaks: secret detection in staged files ----
+if command -v gitleaks > /dev/null 2>&1; then
+  # gitleaks >= 8.19 uses "git --staged"; "protect" is the legacy subcommand.
+  if gitleaks git --help > /dev/null 2>&1; then
+    GL_CMD="git"
+  else
+    GL_CMD="protect"
+  fi
+  gitleaks "$GL_CMD" --staged --redact --no-banner --log-level error . > /dev/null 2>&1
+  GL_RC=$?
+  if [ "$GL_RC" -eq 0 ]; then
+    ST_GITLEAKS="ok"
+  elif [ "$GL_RC" -eq 1 ]; then
+    ST_GITLEAKS="findings"
+    echo "[SECURITY AUDIT] gitleaks: possible secrets detected in staged files."
+    echo "  >> Details: gitleaks $GL_CMD --staged --redact ."
+    FOUND_ISSUES=1
+  else
+    # 126 = unknown flag; any other non-zero = execution failure.
+    ST_GITLEAKS="erro"
+    echo "[SECURITY AUDIT] gitleaks did NOT run (rc=$GL_RC) -- this is not a finding."
+    TOOL_ERROR=1
+  fi
+fi
+
+# ---- Semgrep: SAST (staged files only) ----
+if command -v semgrep > /dev/null 2>&1; then
+  if [ -s "$CODE_LIST" ]; then
+    # --error is mandatory: without it semgrep exits with 0 even when findings exist.
+    # -- separates flags from files whose names might begin with "-".
+    xargs -0 semgrep --config=p/default --error --quiet --disable-version-check -- \
+      < "$CODE_LIST" > /dev/null 2>&1
+    SG_RC=$?
+    if [ "$SG_RC" -eq 0 ]; then
+      ST_SEMGREP="ok"
+    elif [ "$SG_RC" -eq 1 ]; then
+      ST_SEMGREP="findings"
+      echo "[SECURITY AUDIT] semgrep: security findings in staged files."
+      echo "  >> Details: semgrep --config=p/default <file>"
+      FOUND_ISSUES=1
+    else
+      # 7 = unreachable config (registry down/offline), 123 = invalid path, 2 = usage error.
+      ST_SEMGREP="erro"
+      echo "[SECURITY AUDIT] semgrep did NOT run (rc=$SG_RC) -- this is not a finding."
+      TOOL_ERROR=1
+    fi
+  else
+    ST_SEMGREP="n/a"
+  fi
+fi
+
+# ---- Trivy: dependency vulnerability scanning ----
+if command -v trivy > /dev/null 2>&1; then
+  if [ -s "$DEPS_LIST" ]; then
+    # --exit-code 2 separates findings from errors (trivy uses 1 for execution failure).
+    # --skip-db-update avoids downloading the vulnerability database on every commit.
+    xargs -0 trivy fs --scanners vuln --severity HIGH,CRITICAL --exit-code 2 \
+      --quiet --skip-db-update < "$DEPS_LIST" > /dev/null 2>&1
+    TV_RC=$?
+    if [ "$TV_RC" -eq 0 ]; then
+      ST_TRIVY="ok"
+    elif [ "$TV_RC" -eq 2 ]; then
+      ST_TRIVY="findings"
+      echo "[SECURITY AUDIT] trivy: HIGH/CRITICAL vulnerabilities in dependencies."
+      echo "  >> Details: trivy fs --scanners vuln --severity HIGH,CRITICAL <file>"
+      FOUND_ISSUES=1
+    else
+      ST_TRIVY="erro"
+      echo "[SECURITY AUDIT] trivy did NOT run (rc=$TV_RC) -- this is not a finding."
+      TOOL_ERROR=1
+    fi
+  else
+    ST_TRIVY="n/a"
+  fi
+fi
+
+# ---- Status line: ALWAYS output, passing or not ----
+if [ "$FOUND_ISSUES" -ne 0 ]; then
+  RESULT="findings"
+elif [ "$TOOL_ERROR" -ne 0 ]; then
+  RESULT="erro"
+else
+  RESULT="clean"
+fi
+if [ "$N_STAGED" = "1" ]; then PLURAL="file"; else PLURAL="files"; fi
+echo "[SECURITY AUDIT] gitleaks:$ST_GITLEAKS  semgrep:$ST_SEMGREP  trivy:$ST_TRIVY  (${N_STAGED} ${PLURAL})"
+
+# ---- Detailed messages only when there is something to report ----
+if [ "$FOUND_ISSUES" -ne 0 ]; then
+  echo ""
+  echo "[SECURITY AUDIT] Possible security issues were found."
+  echo "  >> No commit was blocked (audit mode)."
+  echo "  >> Review before pushing. Where a security pipeline is configured (Onde o pipeline estiver configurado),"
+  echo "     these same scans run again on the server."
+  echo ""
+elif [ "$TOOL_ERROR" -ne 0 ]; then
+  echo "  >> A scanner failed to execute. The commit proceeds, but this part"
+  echo "     was NOT verified -- treat as unverified, not clean."
+fi
+
+# ---- State output for statusline ----
+STATE_DIR="${SECURITY_HOOK_STATE_DIR:-$HOME/.git-hooks}"
+if [ -d "$STATE_DIR" ] 2>/dev/null; then
+  REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || echo '?')")
+  printf '{"ts":"%s","result":"%s","gitleaks":"%s","semgrep":"%s","trivy":"%s","files":%s,"repo":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')" \
+    "$RESULT" "$ST_GITLEAKS" "$ST_SEMGREP" "$ST_TRIVY" "${N_STAGED:-0}" "$REPO_NAME" \
+    > "$STATE_DIR/last-scan.json" 2>/dev/null || true
+fi
+
+exit 0

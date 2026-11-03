@@ -1,0 +1,6 @@
+{
+  "TelemetryLevel": "off",
+  "EnableFeedback": false,
+  "ChatToolsAutoApprove": false,
+  "ChatToolsTerminalEnableAutoApprove": false
+}

@@ -1,0 +1,310 @@
+{
+  "id": "claude-code",
+  "label": "Claude Code CLI (user profile)",
+  "tool": "claude-code",
+  "scope": "user",
+  "requires_admin": false,
+  "selectors": [
+    "claude",
+    "claude-code"
+  ],
+  "enforcement": {
+    "windows": "advisory",
+    "linux": "advisory",
+    "darwin": "advisory"
+  },
+  "$comment": [
+    "User layer: the developer can edit everything here. Real enforcement",
+    "lives in targets/claude-managed.json. This target remains valid because",
+    "(a) CLAUDE.md only exists in this layer and (b) without allowManagedPermissionRulesOnly",
+    "the rules combine, providing coverage on machines without an admin layer."
+  ],
+  "preflight": [
+    {
+      "type": "warn-if-exists",
+      "path": {
+        "windows": "${PROGRAMFILES}/ClaudeCode/managed-settings.json",
+        "linux": "/etc/claude-code/managed-settings.json",
+        "darwin": "/Library/Application Support/ClaudeCode/managed-settings.json"
+      },
+      "message": "managed-settings.json exists on this machine. If allowManagedPermissionRulesOnly=true is set, permission rules written HERE will be IGNORED by the CLI -- the managed source takes precedence. CLAUDE.md continues to function normally."
+    }
+  ],
+  "files": [
+    {
+      "dest": {
+        "windows": "${HOME}/.claude/security-review-playbook.md",
+        "linux": "${HOME}/.claude/security-review-playbook.md",
+        "darwin": "${HOME}/.claude/security-review-playbook.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "backup": true,
+      "$comment": "Deep reference read ON-DEMAND -- not part of context files. core-guidelines points to it via relative name. overwrite instead of md-block: the entire file is ours, nothing for the developer to customize here.",
+      "payload_file": "policy/security-review-playbook.md"
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.claude/brand-identity.md",
+        "linux": "${HOME}/.claude/brand-identity.md",
+        "darwin": "${HOME}/.claude/brand-identity.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "$comment": "Group palette. On-demand, like the playbook: color matters only in front-end, documentation, or diagrams, avoiding prompt preamble bloat across the four tools.",
+      "payload_file": "policy/brand-identity.md"
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.claude/CLAUDE.md",
+        "linux": "${HOME}/.claude/CLAUDE.md",
+        "darwin": "${HOME}/.claude/CLAUDE.md"
+      },
+      "format": "markdown",
+      "strategy": "md-block",
+      "marker": "<!-- security-team-block -->",
+      "compose": [
+        "policy/core-runtime.md",
+        "policy/vendor-claude-code.md"
+      ],
+      "superseded_by": {
+        "windows": "${PROGRAMFILES}/ClaudeCode/CLAUDE.md",
+        "linux": "/etc/claude-code/CLAUDE.md",
+        "darwin": "/Library/Application Support/ClaudeCode/CLAUDE.md"
+      },
+      "$comment": "Fallback. CLAUDE.md files are CONCATENATED, not overwritten: with the managed layer present, keeping the block here would include the core twice in every prompt. When a managed policy CLAUDE.md exists, this block is REMOVED rather than written -- skipping would not suffice, as machines previously installed without privileges would retain the stale block permanently."
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.claude/settings.json",
+        "linux": "${HOME}/.claude/settings.json",
+        "darwin": "${HOME}/.claude/settings.json"
+      },
+      "format": "json",
+      "strategy": "merge-permission-lists",
+      "list_parent": "permissions",
+      "lists": [
+        "deny",
+        "ask",
+        "allow"
+      ],
+      "payload": {
+        "permissions": {
+          "deny": [
+            "Read(**/.env)",
+            "Edit(**/.env)",
+            "Read(**/.env.*)",
+            "Edit(**/.env.*)",
+            "Read(**/secrets/**)",
+            "Edit(**/secrets/**)",
+            "Read(**/credentials/**)",
+            "Edit(**/credentials/**)",
+            "Read(**/id_rsa)",
+            "Edit(**/id_rsa)",
+            "Read(**/id_ed25519)",
+            "Edit(**/id_ed25519)",
+            "Read(**/*.key)",
+            "Edit(**/*.key)",
+            "Read(**/*.pem)",
+            "Edit(**/*.pem)",
+            "Read(**/*.p12)",
+            "Edit(**/*.p12)",
+            "Read(**/*.pfx)",
+            "Edit(**/*.pfx)",
+            "Read(**/*.jks)",
+            "Edit(**/*.jks)",
+            "Read(**/*.kdbx)",
+            "Edit(**/*.kdbx)",
+            "Read(~/.ssh/**)",
+            "Read(//Users/**/.ssh/**)",
+            "Read(//home/**/.ssh/**)",
+            "Read(//c/Users/**/.ssh/**)",
+            "Edit(~/.ssh/**)",
+            "Edit(//Users/**/.ssh/**)",
+            "Edit(//home/**/.ssh/**)",
+            "Edit(//c/Users/**/.ssh/**)",
+            "Read(~/.aws/**)",
+            "Edit(~/.aws/**)",
+            "Read(//Users/**/.aws/**)",
+            "Edit(//Users/**/.aws/**)",
+            "Read(//home/**/.aws/**)",
+            "Edit(//home/**/.aws/**)",
+            "Read(//c/Users/**/.aws/**)",
+            "Edit(//c/Users/**/.aws/**)",
+            "Read(~/.azure/**)",
+            "Edit(~/.azure/**)",
+            "Read(~/.config/gcloud/**)",
+            "Edit(~/.config/gcloud/**)",
+            "Read(~/.gnupg/**)",
+            "Edit(~/.gnupg/**)",
+            "Read(//Users/**/.gnupg/**)",
+            "Edit(//Users/**/.gnupg/**)",
+            "Read(//home/**/.gnupg/**)",
+            "Edit(//home/**/.gnupg/**)",
+            "Read(//c/Users/**/.gnupg/**)",
+            "Edit(//c/Users/**/.gnupg/**)",
+            "Read(~/.kube/**)",
+            "Edit(~/.kube/**)",
+            "Read(//Users/**/.kube/**)",
+            "Edit(//Users/**/.kube/**)",
+            "Read(//home/**/.kube/**)",
+            "Edit(//home/**/.kube/**)",
+            "Read(//c/Users/**/.kube/**)",
+            "Edit(//c/Users/**/.kube/**)",
+            "Read(~/.docker/config.json)",
+            "Edit(~/.docker/config.json)",
+            "Read(~/.git-credentials)",
+            "Edit(~/.git-credentials)",
+            "Read(~/.netrc)",
+            "Edit(~/.netrc)",
+            "Read(~/.npmrc)",
+            "Edit(~/.npmrc)",
+            "Read(~/.pypirc)",
+            "Edit(~/.pypirc)",
+            "Read(~/.terraform.d/credentials.tfrc.json)",
+            "Edit(~/.terraform.d/credentials.tfrc.json)",
+            "Bash(chmod 777:*)",
+            "Bash(git push --force:*)",
+            "Bash(git config --global core.hooksPath:*)",
+            "Bash(git commit --no-verify:*)",
+            "Bash(git push -f:*)",
+            "Bash(git filter-branch:*)",
+            "Bash(kubectl get secret:*)",
+            "Bash(kubectl get secrets:*)",
+            "Bash(kubectl describe secret:*)",
+            "Bash(kubectl describe secrets:*)",
+            "Bash(kubectl create token:*)"
+          ],
+          "ask": [
+            "Bash(python:*)",
+            "Bash(python3:*)",
+            "Bash(npm install -g:*)",
+            "Bash(pip install:*)",
+            "Bash(node:*)",
+            "Bash(npx:*)",
+            "Bash(npm audit fix:*)",
+            "Bash(npm install:*)",
+            "Bash(npm update:*)",
+            "Bash(pnpm:*)",
+            "Bash(yarn:*)",
+            "Bash(bun:*)",
+            "Bash(pipx:*)",
+            "Bash(poetry:*)",
+            "Bash(uv:*)",
+            "Bash(terraform apply:*)",
+            "Bash(sudo:*)",
+            "Bash(curl:*)",
+            "Bash(wget:*)",
+            "Bash(docker run:*)",
+            "Bash(docker build:*)",
+            "Bash(docker push:*)",
+            "Bash(docker rm:*)",
+            "Bash(docker rmi:*)",
+            "Bash(docker exec:*)",
+            "Bash(docker logs:*)",
+            "Bash(docker inspect:*)",
+            "Bash(docker compose logs:*)",
+            "Bash(docker compose up:*)",
+            "Bash(docker compose down:*)",
+            "Bash(docker system prune:*)",
+            "Bash(kubectl apply:*)",
+            "Bash(kubectl delete:*)",
+            "Bash(kubectl exec:*)",
+            "Bash(kubectl scale:*)",
+            "Bash(kubectl rollout:*)",
+            "Bash(kubectl port-forward:*)",
+            "Bash(kubectl get:*)",
+            "Bash(kubectl describe:*)",
+            "Bash(kubectl logs:*)",
+            "Bash(terraform destroy:*)",
+            "Bash(terraform import:*)",
+            "Bash(terraform state rm:*)",
+            "Bash(terraform plan:*)",
+            "Bash(terraform show:*)",
+            "Bash(terraform output:*)",
+            "Bash(aws iam:*)",
+            "Bash(aws s3 rm:*)",
+            "Bash(aws s3 sync:*)",
+            "Bash(aws ec2 terminate-instances:*)",
+            "Bash(aws cloudformation delete-stack:*)",
+            "Bash(git push:*)",
+            "Bash(git commit:*)",
+            "Bash(git clone:*)",
+            "Bash(git config --global:*)",
+            "Bash(git submodule update:*)",
+            "Bash(git reset --hard:*)",
+            "Bash(git clean:*)",
+            "Bash(git rebase:*)",
+            "Bash(git restore:*)",
+            "Bash(git branch -D:*)",
+            "Bash(git branch -d:*)",
+            "Bash(git tag -d:*)",
+            "Bash(git remote add:*)",
+            "Bash(git remote set-url:*)",
+            "Bash(git remote remove:*)",
+            "Bash(git stash drop:*)",
+            "Bash(git stash clear:*)"
+          ],
+          "allow": [
+            "Bash(git status:*)",
+            "Bash(git diff:*)",
+            "Bash(git log:*)",
+            "Bash(git add:*)",
+            "Bash(git branch:*)",
+            "Bash(npm run:*)",
+            "Bash(npm audit:*)",
+            "Bash(npm test:*)",
+            "Bash(docker ps:*)",
+            "Bash(docker images:*)",
+            "Bash(semgrep:*)",
+            "Bash(trivy:*)",
+            "Bash(gitleaks:*)",
+            "Bash(docker version:*)",
+            "Bash(docker compose ps:*)",
+            "Bash(kubectl config current-context:*)",
+            "Bash(terraform validate:*)",
+            "Bash(terraform fmt:*)",
+            "Bash(aws sts get-caller-identity:*)",
+            "Bash(aws s3 ls:*)",
+            "Bash(aws ec2 describe-:*)",
+            "Bash(aws logs describe-:*)",
+            "Bash(git show:*)",
+            "Bash(git fetch:*)",
+            "Bash(git remote -v:*)",
+            "Bash(git stash list:*)",
+            "Bash(git blame:*)",
+            "Bash(git rev-parse:*)",
+            "Bash(git ls-files:*)"
+          ]
+        }
+      }
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.claude.json",
+        "linux": "${HOME}/.claude.json",
+        "darwin": "${HOME}/.claude.json"
+      },
+      "format": "json",
+      "strategy": "merge-mcp",
+      "mcp_key": "mcpServers",
+      "$comment": "User profile root, NOT inside .claude/. This file also stores CLI runtime state -- therefore merge, never overwrite.",
+      "payload": {
+        "mcpServers": {
+          "semgrep": {
+            "command": "semgrep",
+            "args": [
+              "mcp"
+            ],
+            "env": {
+              "SEMGREP_RULES": "p/default"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "notes": [
+    "Third-party skills are intentionally excluded from the default baseline. Organizations may install independently reviewed skills through their own approved process."
+  ]
+}

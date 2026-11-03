@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local cloud provider credential test directory. Even if empty, it is not
+# part of the baseline and must never be reintroduced inadvertently.
+.aws/
+
+# Backup files created by installers when overwriting existing configs.
+# Must never be committed: they represent PREVIOUS host state and restoring
+# one silently rolls back baseline configuration.
+*.bak
+
+# Claude Code local overrides: developer-specific by convention, often
+# containing machine-specific absolute file paths.
+.claude/settings.local.json
+
+# Local coding-agent state. Repository guidance lives in AGENTS.md and
+# .claude/rules/; do not commit tool runtime state or scratch files.
+.agents/
+.codex/
+scratch/
+
+# Artifact from build-package.ps1
+*.zip
+dist/
+
+# Operating system / editor metadata
+.DS_Store
+Thumbs.db
+*~
+*.swp

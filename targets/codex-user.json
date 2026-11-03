@@ -1,0 +1,89 @@
+{
+  "id": "codex-user",
+  "label": "Codex CLI (user profile)",
+  "tool": "codex-cli",
+  "scope": "user",
+  "requires_admin": false,
+  "selectors": [
+    "codex",
+    "codex-user"
+  ],
+  "enforcement": {
+    "windows": "advisory",
+    "linux": "advisory",
+    "darwin": "advisory"
+  },
+  "$comment": [
+    "No target writes ~/.codex/config.toml. Duplicate TOML keys are parse errors,",
+    "not last-one-wins: prepending our block to a developer-customized config",
+    "would leave Codex unable to load it. We write only files owned by this",
+    "package.",
+    "",
+    "managed_config.toml appears here rather than in codex-managed.json because",
+    "on Windows it lives in ~/.codex, not ProgramData. On Unix the equivalent",
+    "lives in /etc/codex and is applied there, so the destination below covers",
+    "Windows only."
+  ],
+  "files": [
+    {
+      "dest": {
+        "windows": "${HOME}/.codex/security-review-playbook.md",
+        "linux": "${HOME}/.codex/security-review-playbook.md",
+        "darwin": "${HOME}/.codex/security-review-playbook.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "backup": true,
+      "$comment": "On-demand reference; it does not enter the context file. core-guidelines refers to it by relative name. overwrite is used because the complete file belongs to this package.",
+      "payload_file": "policy/security-review-playbook.md"
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.codex/brand-identity.md",
+        "linux": "${HOME}/.codex/brand-identity.md",
+        "darwin": "${HOME}/.codex/brand-identity.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "$comment": "Generic brand template. Like the playbook, it is loaded on demand because visual guidance matters only for front-end work, documents, or diagrams.",
+      "payload_file": "policy/brand-identity.md"
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.codex/AGENTS.md",
+        "linux": "${HOME}/.codex/AGENTS.md",
+        "darwin": "${HOME}/.codex/AGENTS.md"
+      },
+      "format": "markdown",
+      "strategy": "md-block",
+      "marker": "<!-- security-team-block -->",
+      "compose": [
+        "policy/core-runtime.md",
+        "policy/vendor-codex-cli.md"
+      ]
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.codex/managed_config.toml"
+      },
+      "format": "toml",
+      "strategy": "overwrite",
+      "backup": true,
+      "payload_file": "policy/codex-managed-defaults.toml"
+    }
+  ],
+  "preflight": [
+    {
+      "type": "warn-if-exists",
+      "path": {
+        "windows": "${HOME}/.codex/AGENTS.override.md",
+        "linux": "${HOME}/.codex/AGENTS.override.md",
+        "darwin": "${HOME}/.codex/AGENTS.override.md"
+      },
+      "message": "AGENTS.override.md takes precedence over AGENTS.md, so the security guidance will be silently ignored. Move its content into AGENTS.md or remove the override."
+    }
+  ],
+  "notes": [
+    "Repository AGENTS.md takes precedence over the global file when they conflict. Global guidance is a default, not a ceiling; the pipeline remains the real gate."
+  ]
+}

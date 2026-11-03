@@ -1,0 +1,28 @@
+# security-team-block -- source for the Codex CLI managed_config.toml
+# Referenced by targets/codex-managed.json on Unix and targets/codex-user.json
+# on Windows, where this file lives in ~/.codex rather than ProgramData.
+#
+# These are defaults, not enforcement. Users may change them during a session;
+# requirements.toml controls non-overridable restrictions.
+
+approval_policy = "on-request"
+web_search = "cached"
+
+[sandbox_workspace_write]
+# This egress control is enforced by the OS sandbox rather than command-name
+# matching, so it applies to all binaries.
+network_access = false
+
+[rules]
+prefix_rules = [
+  { pattern = [{ token = "semgrep" }], decision = "allow", justification = "Approved security scanner." },
+  { pattern = [{ token = "trivy" }], decision = "allow", justification = "Approved security scanner." },
+  { pattern = [{ token = "gitleaks" }], decision = "allow", justification = "Approved security scanner." },
+  { pattern = [{ token = "git" }, { any_of = ["status", "diff", "log", "branch", "add", "show", "fetch", "blame", "rev-parse", "ls-files"] }], decision = "allow", justification = "Read-only and staging Git workflow." },
+  { pattern = [{ token = "npm" }, { any_of = ["run", "test"] }], decision = "allow", justification = "Project build and test workflow." },
+]
+
+[mcp_servers.semgrep]
+command = "semgrep"
+args = ["mcp"]
+env = { SEMGREP_RULES = "p/default" }

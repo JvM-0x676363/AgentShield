@@ -1,0 +1,86 @@
+{
+  "id": "vscode",
+  "label": "VS Code -- security extension settings",
+  "tool": "vscode",
+  "scope": "user",
+  "requires_admin": false,
+  "selectors": ["vscode", "code"],
+  "enforcement": {
+    "windows": "advisory",
+    "linux": "advisory",
+    "darwin": "advisory"
+  },
+  "$comment": [
+    "merge-missing-keys, not merge or overwrite: it adds only missing keys",
+    "and never replaces a value already chosen by the developer.",
+    "",
+    "semgrep.scan.configuration must stay fixed. The default falls back to",
+    "--config auto. The current p/default value still depends on registry/cache;",
+    "offline local rules are tracked in ROADMAP.md.",
+    "",
+    "VS Code settings.json accepts comments (JSONC). A strict JSON parser fails",
+    "on them, so the engine preserves the file instead of overwriting it when",
+    "parsing fails.",
+    "",
+    "Extension installation is not defined here: it is profile-scoped and needs",
+    "a signed-in user, so it is handled through GPO (see vscode-gpo/)."
+  ],
+  "$comment2": [
+    "Three Linux entries are required. Each VS Code package reads a different",
+    "User directory: deb/rpm uses ~/.config, snap uses ~/snap/code/current/.config,",
+    "and flatpak uses ~/.var/app/.... Covering only the first left snap users",
+    "without configuration.",
+    "",
+    "The two alternatives use only_if_parent_exists to avoid creating ~/snap/",
+    "for non-snap users. The deb/rpm path is unconditional so it also supports",
+    "VS Code installed later."
+  ],
+  "files": [
+    {
+      "dest": {
+        "windows": "${APPDATA}/Code/User/settings.json",
+        "linux": "${HOME}/.config/Code/User/settings.json",
+        "darwin": "${HOME}/Library/Application Support/Code/User/settings.json"
+      },
+      "format": "json",
+      "strategy": "merge-missing-keys",
+      "tolerate_jsonc": true,
+      "payload": {
+        "semgrep.path": "semgrep",
+        "semgrep.scan.configuration": ["p/default"],
+        "semgrep.metrics": false,
+        "sonarlint.disableTelemetry": true
+      }
+    },
+    {
+      "dest": {
+        "linux": "${HOME}/snap/code/current/.config/Code/User/settings.json"
+      },
+      "format": "json",
+      "strategy": "merge-missing-keys",
+      "tolerate_jsonc": true,
+      "only_if_parent_exists": true,
+      "payload": {
+        "semgrep.path": "semgrep",
+        "semgrep.scan.configuration": ["p/default"],
+        "semgrep.metrics": false,
+        "sonarlint.disableTelemetry": true
+      }
+    },
+    {
+      "dest": {
+        "linux": "${HOME}/.var/app/com.visualstudio.code/config/Code/User/settings.json"
+      },
+      "format": "json",
+      "strategy": "merge-missing-keys",
+      "tolerate_jsonc": true,
+      "only_if_parent_exists": true,
+      "payload": {
+        "semgrep.path": "semgrep",
+        "semgrep.scan.configuration": ["p/default"],
+        "semgrep.metrics": false,
+        "sonarlint.disableTelemetry": true
+      }
+    }
+  ]
+}

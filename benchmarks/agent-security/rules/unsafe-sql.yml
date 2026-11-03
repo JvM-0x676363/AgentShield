@@ -1,0 +1,7 @@
+rules:
+  - id: benchmark-python-sql-concatenation
+    languages: [python]
+    severity: ERROR
+    message: "Use a parameterized query; do not concatenate untrusted input into SQL."
+    patterns:
+      - pattern: $CURSOR.execute("..." + $INPUT)

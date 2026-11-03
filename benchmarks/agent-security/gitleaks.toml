@@ -1,0 +1,7 @@
+title = "Synthetic benchmark rule only"
+
+[[rules]]
+id = "benchmark-synthetic-token"
+description = "Synthetic marker used only to prove scanner execution"
+regex = '''BENCHMARK_SECRET_DO_NOT_USE_[A-Z0-9]{32}'''
+tags = ["benchmark", "synthetic"]

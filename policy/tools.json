@@ -1,0 +1,63 @@
+{
+  "$schema_version": 1,
+  "$comment": "Single catalog of artifacts installed by the entry points. Versions and hashes change only through reviewed pull requests; never resolve 'latest' on a developer endpoint.",
+  "tools": {
+    "gitleaks": {
+      "version": "8.30.1",
+      "binary": "gitleaks",
+      "assets": {
+        "linux-x64": {
+          "file": "gitleaks_8.30.1_linux_x64.tar.gz",
+          "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        },
+        "linux-arm64": {
+          "file": "gitleaks_8.30.1_linux_arm64.tar.gz",
+          "sha256": "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080"
+        },
+        "darwin-x64": {
+          "file": "gitleaks_8.30.1_darwin_x64.tar.gz",
+          "sha256": "dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709"
+        },
+        "darwin-arm64": {
+          "file": "gitleaks_8.30.1_darwin_arm64.tar.gz",
+          "sha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
+        },
+        "windows-x64": {
+          "file": "gitleaks_8.30.1_windows_x64.zip",
+          "sha256": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e"
+        }
+      }
+    },
+    "trivy": {
+      "version": "0.74.0",
+      "binary": "trivy",
+      "assets": {
+        "linux-x64": {
+          "file": "trivy_0.74.0_Linux-64bit.tar.gz",
+          "sha256": "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"
+        },
+        "linux-arm64": {
+          "file": "trivy_0.74.0_Linux-ARM64.tar.gz",
+          "sha256": "b94ce1976bbf3c15b514b605ee88be7c6d94a29be2302847ff01cb794d47aad5"
+        },
+        "darwin-x64": {
+          "file": "trivy_0.74.0_macOS-64bit.tar.gz",
+          "sha256": "472816f6888dda689d075c30254d4210b4d1035acf365aa72332f584c2f60485"
+        },
+        "darwin-arm64": {
+          "file": "trivy_0.74.0_macOS-ARM64.tar.gz",
+          "sha256": "1caada5e0e2091909357c7525d3aa76f4b660b13821bc143b190c7483e31cc11"
+        },
+        "windows-x64": {
+          "file": "trivy_0.74.0_windows-64bit.zip",
+          "sha256": "94c40e0696e4b907a74b7b2e1438d5d72ebaca83115817407f568a002d520842"
+        }
+      }
+    },
+    "semgrep": {
+      "version": "1.175.0",
+      "binary": "semgrep",
+      "$comment": "Python has platform-specific transitive dependencies, so the version is pinned here. For hash pinning, promote an approved wheelhouse with requirements --require-hashes."
+    }
+  }
+}

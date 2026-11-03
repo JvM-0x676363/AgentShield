@@ -1,0 +1,90 @@
+# =============================================================================
+# Security Scan Pipeline - Bitbucket Pipelines
+# Authoritative security gate: blocks the build upon finding critical issues.
+# Unlike local hooks (audit mode), developers CANNOT bypass this with --no-verify.
+#
+# Reminder: this YAML alone does not prevent merging. You must enable
+# "require_passing_builds_to_merge" in Branch restrictions (see bitbucket/README.md).
+# =============================================================================
+
+image: atlassian/default-image:4
+
+# gitleaks scans git history. Bitbucket default (depth 50) misses older commits.
+clone:
+  depth: full
+
+# Pinned images by version. ':latest' on security scanners is
+# A03:2025 Software Supply Chain Failures per our taxonomy: builds become
+# non-reproducible, and a modified image gains repo access without changing YAML.
+# Pinning by digest (@sha256:...) is even stronger and is the next step;
+# pinning version eliminates the worst of the problem.
+#
+# When upgrading: run scan once with new version before promoting -- new rules
+# may flag items previously allowed, and discovering this during an urgent merge is the worst time.
+definitions:
+  caches:
+    semgrep: ~/.cache/semgrep
+    trivy: /root/.cache/trivy
+
+  steps:
+    - step: &secret-scan
+        name: "Secret Scan (gitleaks)"
+        max-time: 15
+        image: ghcr.io/gitleaks/gitleaks:v8.30.1
+        script:
+          # "gitleaks detect" was renamed to "gitleaks git" (>= 8.19).
+          # Report is always generated; exit code is deferred to the end so that
+          # after-script can display it (Bitbucket does not publish artifacts of failed steps).
+          - gitleaks git . --redact --report-format json --report-path gitleaks-report.json --exit-code 1 || echo $? > .scan-failed
+          - test ! -f .scan-failed
+        after-script:
+          - if [ -s gitleaks-report.json ]; then echo "=== gitleaks findings ==="; cat gitleaks-report.json; fi
+        artifacts:
+          - gitleaks-report.json
+
+    - step: &sast-scan
+        name: "SAST (semgrep)"
+        max-time: 25
+        image: semgrep/semgrep:1.175.0
+        caches:
+          - semgrep
+        script:
+          # --error is required: without it semgrep exits 0 even with findings.
+          # p/default is reproducible; "auto" changes rules unannounced between builds.
+          - semgrep --config p/default --error --json --output semgrep-report.json . || echo $? > .scan-failed
+          - test ! -f .scan-failed
+        after-script:
+          - if [ -s semgrep-report.json ]; then echo "=== semgrep findings ==="; head -c 20000 semgrep-report.json; fi
+        artifacts:
+          - semgrep-report.json
+
+    - step: &dependency-scan
+        name: "Dependency & IaC Scan (trivy)"
+        max-time: 20
+        image: aquasec/trivy:0.74.0
+        caches:
+          - trivy
+        script:
+          - trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --exit-code 1 --format json --output trivy-report.json . || echo $? > .scan-failed
+          - test ! -f .scan-failed
+        after-script:
+          - if [ -s trivy-report.json ]; then echo "=== trivy findings ==="; head -c 20000 trivy-report.json; fi
+        artifacts:
+          - trivy-report.json
+
+  # All 3 scans run in parallel; reused across all triggers below.
+  security-scans: &security-scans
+    - parallel:
+        - step: *secret-scan
+        - step: *sast-scan
+        - step: *dependency-scan
+
+pipelines:
+  default: *security-scans
+
+  pull-requests:
+    '**': *security-scans
+
+  branches:
+    main: *security-scans
+    master: *security-scans

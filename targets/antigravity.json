@@ -1,0 +1,230 @@
+{
+  "id": "antigravity",
+  "label": "Antigravity IDE + CLI (user profile)",
+  "tool": "antigravity",
+  "scope": "user",
+  "requires_admin": false,
+  "selectors": [
+    "antigravity",
+    "ag"
+  ],
+  "enforcement": {
+    "windows": "advisory",
+    "linux": "advisory",
+    "darwin": "advisory"
+  },
+  "$comment": [
+    "ONLY tool of the three without an admin layer. There is no equivalent of managed-settings",
+    "(Claude) or requirements.toml (Codex): everything lives in the user profile and the",
+    "developer can edit everything. 'advisory' across ALL THREE platforms, including Windows --",
+    "the exception to the rollout rule.",
+    "",
+    "Rule precedence is DENY > ASK > ALLOW, by bucket and not by",
+    "specificity. Practical consequence dictating the list below: a",
+    "command(*) in ask would override all of allow. Therefore ask lists commands individually",
+    "instead of using wildcards, and docker ps/images is NOT in",
+    "allow -- command(docker) in ask would override it anyway. Same divergence",
+    "accepted in Codex, for the same reason.",
+    "",
+    "This target inherited context files from gemini-user, removed when",
+    "Gemini CLI was removed from the package: Antigravity reads ~/.gemini/GEMINI.md and the",
+    "playbook beside it, so removing the Gemini target would have removed the Rules delivery",
+    "for the tool that remains. The constant boundary applies: never write",
+    "~/.gemini/settings.json, which is not ours."
+  ],
+  "files": [
+    {
+      "dest": {
+        "windows": "${HOME}/.gemini/antigravity-cli/settings.json",
+        "linux": "${HOME}/.gemini/antigravity-cli/settings.json",
+        "darwin": "${HOME}/.gemini/antigravity-cli/settings.json"
+      },
+      "format": "json",
+      "strategy": "merge-permission-lists",
+      "list_parent": "permissions",
+      "lists": [
+        "deny",
+        "ask",
+        "allow"
+      ],
+      "payload": {
+        "permissions": {
+          "deny": [
+            "read_file(.env)",
+            "read_file(.env.local)",
+            "read_file(secrets)",
+            "read_file(credentials)",
+            "read_file(id_rsa)",
+            "read_file(id_ed25519)",
+            "read_file(~/.ssh)",
+            "read_file(~/.aws)",
+            "read_file(~/.azure)",
+            "read_file(~/.gnupg)",
+            "read_file(~/.kube)",
+            "read_file(~/.config/gcloud)",
+            "read_file(~/.docker/config.json)",
+            "read_file(~/.git-credentials)",
+            "read_file(~/.netrc)",
+            "read_file(~/.npmrc)",
+            "read_file(~/.pypirc)",
+            "read_file(~/.terraform.d/credentials.tfrc.json)",
+            "write_file(~/.ssh)",
+            "write_file(.git/)",
+            "command(curl)",
+            "command(wget)",
+            "command(sudo)",
+            "command(chmod 777)",
+            "command(npm install -g)",
+            "command(pip install)",
+            "command(git push --force)",
+            "command(git commit --no-verify)",
+            "command(git config --global core.hooksPath)",
+            "command(kubectl get secret)",
+            "command(kubectl get secrets)",
+            "command(kubectl describe secret)",
+            "command(kubectl describe secrets)",
+            "command(kubectl create token)",
+            "execute_url(*)",
+            "unsandboxed(*)",
+            "command(git push -f)",
+            "command(git filter-branch)"
+          ],
+          "ask": [
+            "command(python)",
+            "command(python3)",
+            "command(node)",
+            "command(npx)",
+            "command(npm install)",
+            "command(npm update)",
+            "command(pnpm)",
+            "command(yarn)",
+            "command(bun)",
+            "command(pipx)",
+            "command(poetry)",
+            "command(uv)",
+            "command(docker)",
+            "command(terraform apply)",
+            "command(terraform plan)",
+            "command(terraform show)",
+            "command(terraform output)",
+            "command(kubectl)",
+            "command(git push)",
+            "command(git commit)",
+            "command(git clone)",
+            "command(git config --global)",
+            "command(git submodule update)",
+            "command(git reset --hard)",
+            "command(git clean)",
+            "command(git rebase)",
+            "command(git restore)",
+            "command(git branch -D)",
+            "command(git branch -d)",
+            "command(git tag -d)",
+            "command(git remote add)",
+            "command(git remote set-url)",
+            "command(git remote remove)",
+            "command(git stash drop)",
+            "command(git stash clear)"
+          ],
+          "allow": [
+            "command(git status)",
+            "command(git diff)",
+            "command(git log)",
+            "command(git add)",
+            "command(git branch)",
+            "command(npm run)",
+            "command(npm test)",
+            "command(semgrep)",
+            "command(trivy)",
+            "command(gitleaks)",
+            "mcp(semgrep/*)",
+            "command(git show)",
+            "command(git fetch)",
+            "command(git stash list)",
+            "command(git blame)"
+          ]
+        }
+      }
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.gemini/antigravity-cli/settings.json",
+        "linux": "${HOME}/.gemini/antigravity-cli/settings.json",
+        "darwin": "${HOME}/.gemini/antigravity-cli/settings.json"
+      },
+      "format": "json",
+      "strategy": "merge-missing-keys",
+      "$comment": "Secure defaults without overriding explicit developer choices: commands run in the sandbox and files outside the workspace remain unavailable. Antigravity has no admin layer; this is an advisory baseline, reassessed via reapply/audit.",
+      "payload": {
+        "toolPermission": "proceed-in-sandbox",
+        "enableTerminalSandbox": true,
+        "allowNonWorkspaceAccess": false
+      }
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.gemini/config/mcp_config.json",
+        "linux": "${HOME}/.gemini/config/mcp_config.json",
+        "darwin": "${HOME}/.gemini/config/mcp_config.json"
+      },
+      "format": "json",
+      "strategy": "merge-mcp",
+      "mcp_key": "mcpServers",
+      "payload": {
+        "mcpServers": {
+          "semgrep": {
+            "command": "semgrep",
+            "args": [
+              "mcp"
+            ],
+            "env": {
+              "SEMGREP_RULES": "p/default"
+            }
+          }
+        }
+      }
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.gemini/security-review-playbook.md",
+        "linux": "${HOME}/.gemini/security-review-playbook.md",
+        "darwin": "${HOME}/.gemini/security-review-playbook.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "backup": true,
+      "$comment": "Deep reference read ON-DEMAND -- not part of context files. core-guidelines points to it via relative name. overwrite instead of md-block: the entire file is ours, nothing for the developer to customize here.",
+      "payload_file": "policy/security-review-playbook.md"
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.gemini/brand-identity.md",
+        "linux": "${HOME}/.gemini/brand-identity.md",
+        "darwin": "${HOME}/.gemini/brand-identity.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "$comment": "Group palette. On-demand, like the playbook: color matters only in front-end, documentation, or diagrams, avoiding prompt preamble bloat across the four tools.",
+      "payload_file": "policy/brand-identity.md"
+    },
+    {
+      "dest": {
+        "windows": "${HOME}/.gemini/GEMINI.md",
+        "linux": "${HOME}/.gemini/GEMINI.md",
+        "darwin": "${HOME}/.gemini/GEMINI.md"
+      },
+      "format": "markdown",
+      "strategy": "md-block",
+      "marker": "<!-- security-team-block -->",
+      "compose": [
+        "policy/core-runtime.md",
+        "policy/vendor-antigravity.md"
+      ],
+      "$comment": "Antigravity reads AGENTS.md and GEMINI.md, and has no documented global path of its own -- guidelines arrive via this file, shared with Gemini CLI. md-block instead of overwrite because the developer writes here: in Gemini CLI /memory add wrote to this file, and that habit persists."
+    }
+  ],
+  "notes": [
+    "Current documentation confirms that read_file(.env) is relative to the workspace root and directories are recursive. No filename glob exists: the rule protects root .env/.env.local, not arbitrary nested .env files. Keep secrets outside the workspace; sandbox and allowNonWorkspaceAccess=false provide the containment boundary.",
+    "Context is hierarchical and concatenated: ~/.gemini/GEMINI.md (global) + repo GEMINI.md + per directory. The file closest to cwd comes later and wins in conflicts, so global guidelines act as defaults, not hard ceilings."
+  ]
+}
