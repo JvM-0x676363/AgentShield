@@ -1232,7 +1232,15 @@ for tool in ("gitleaks", "semgrep", "trivy"):
 for _var, _rc_achado, _nome in (("GL_RC", 1, "gitleaks"),
                                 ("SG_RC", 1, "semgrep"),
                                 ("TV_RC", 2, "trivy")):
-    check('"$%s" -eq %d ]' % (_var, _rc_achado) in text,
+    _finding_branch = '"$%s" -eq %d ]' % (_var, _rc_achado)
+    # xargs returns 123 when its child exits 1. The Semgrep wrapper maps that
+    # finding exit back to success and records it in a marker file.
+    if _nome == "semgrep":
+        _finding_branch = (_finding_branch in text or
+                           ('"$rc" -eq 1 ]' in text and "SEMGREP_FINDINGS" in text))
+    else:
+        _finding_branch = _finding_branch in text
+    check(_finding_branch,
           "  %s: rc=%d is finding; other non-zero is error" % (_nome, _rc_achado))
     check('"$%s" -ne 0 ]' % _var not in text,
           "  %s: does NOT classify 'any non-zero' as finding" % _nome)
