@@ -91,5 +91,5 @@ approved responder workflow and investigate it under your incident or endpoint
 management procedure. Do not use workflow logs to collect user configuration
 or credential data.
 
-See [Operations](../../docs/OPERATIONS.md) for package construction, output
+See the repository's `docs/OPERATIONS.md` for package construction, output
 semantics, and equivalent Intune deployment guidance.

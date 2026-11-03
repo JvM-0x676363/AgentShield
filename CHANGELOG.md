@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## 1.0.1 - 2026-11-03
+
+- Added a Falcon Fusion RTR workflow template with mock-test guidance and
+  pilot-first rollout controls.
+- Included the Falcon RTR template and its guide in the Windows release ZIP.
+
 ## 1.0.0 - 2026-11-02
 
 - Added managed security baselines for Codex, Claude Code, Claude Desktop,

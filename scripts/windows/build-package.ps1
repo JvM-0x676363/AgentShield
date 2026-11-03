@@ -40,7 +40,9 @@ $Files = @(
     "hooks/pre-commit",
     "scripts/windows/install.ps1",
     "scripts/windows/deploy.ps1",
-    "scripts/windows/Test-AgentShieldManaged.ps1"
+    "scripts/windows/Test-AgentShieldManaged.ps1",
+    "integrations/falcon-rtr/README.md",
+    "integrations/falcon-rtr/agentshield-deploy.workflow.template.yaml"
 )
 if ($IncludeShell) {
     $Files += "scripts/unix/install.sh"
@@ -107,6 +109,9 @@ function Get-PackageRelativePath {
         "scripts/unix/install.sh" { return "install.sh" }
         "scripts/unix/deploy.sh" { return "deploy.sh" }
         default {
+            if ($RelativePath.StartsWith("integrations/falcon-rtr/")) {
+                return $RelativePath.Substring("integrations/".Length)
+            }
             if ($RelativePath.StartsWith("integrations/vscode-gpo/")) {
                 return $RelativePath.Substring("integrations/".Length)
             }

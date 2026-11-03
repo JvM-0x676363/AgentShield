@@ -141,7 +141,7 @@ ZIP, performs the configuration-only pass, runs the managed-layer detector,
 and records structured outcomes. It intentionally contains no host-group ID,
 schedule, organization-specific action, or automatic remediation. Configure a
 pilot group and validate the imported actions in your Falcon tenant before any
-broader rollout.
+broader rollout. The release ZIP includes the template at `falcon-rtr/`.
 
 ## Intune
 
