@@ -40,7 +40,8 @@ N_STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | wc -l |
 # NUL-delimited file lists in temporary files (shell variables do not store NUL).
 CODE_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/sec-hook-cod.$$")
 DEPS_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/sec-hook-dep.$$")
-cleanup() { rm -f "$CODE_LIST" "$DEPS_LIST"; }
+SEMGREP_FINDINGS=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/sec-hook-semgrep.$$")
+cleanup() { rm -f "$CODE_LIST" "$DEPS_LIST" "$SEMGREP_FINDINGS"; }
 trap cleanup EXIT HUP INT TERM
 
 git diff --cached -z --name-only --diff-filter=ACM -- \
@@ -82,12 +83,20 @@ if command -v semgrep > /dev/null 2>&1; then
   if [ -s "$CODE_LIST" ]; then
     # --error is mandatory: without it semgrep exits with 0 even when findings exist.
     # -- separates flags from files whose names might begin with "-".
-    xargs -0 semgrep --config=p/default --error --quiet --disable-version-check -- \
-      < "$CODE_LIST" > /dev/null 2>&1
+    export SEMGREP_FINDINGS
+    xargs -0 sh -c '
+      semgrep --config=p/default --error --quiet --disable-version-check -- "$@"
+      rc=$?
+      if [ "$rc" -eq 1 ]; then
+        printf 'finding\n' > "$SEMGREP_FINDINGS"
+        exit 0
+      fi
+      exit "$rc"
+    ' semgrep < "$CODE_LIST" > /dev/null 2>&1
     SG_RC=$?
-    if [ "$SG_RC" -eq 0 ]; then
+    if [ "$SG_RC" -eq 0 ] && [ ! -s "$SEMGREP_FINDINGS" ]; then
       ST_SEMGREP="ok"
-    elif [ "$SG_RC" -eq 1 ]; then
+    elif [ "$SG_RC" -eq 0 ] && [ -s "$SEMGREP_FINDINGS" ]; then
       ST_SEMGREP="findings"
       echo "[SECURITY AUDIT] semgrep: security findings in staged files."
       echo "  >> Details: semgrep --config=p/default <file>"
