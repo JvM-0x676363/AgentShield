@@ -135,6 +135,14 @@ Json`, collect the final result, and retrieve the transcript only when the
 result requires investigation. The deployment script is designed for SYSTEM
 context; do not use `install.ps1` there.
 
+A generic Falcon Fusion Workflow starting point is available in
+[`integrations/falcon-rtr`](../integrations/falcon-rtr/). It stages the release
+ZIP, performs the configuration-only pass, runs the managed-layer detector,
+and records structured outcomes. It intentionally contains no host-group ID,
+schedule, organization-specific action, or automatic remediation. Configure a
+pilot group and validate the imported actions in your Falcon tenant before any
+broader rollout.
+
 ## Intune
 
 Use a silent Win32 installation command with `deploy.ps1 -Force -OutputMode

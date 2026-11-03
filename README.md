@@ -100,6 +100,7 @@ must report zero failures. The optional behavior benchmarks are documented in
 
 - [Architecture and policy model](docs/ARCHITECTURE.md)
 - [Operations: manual, Intune, and CrowdStrike RTR](docs/OPERATIONS.md)
+- [Falcon RTR workflow template](integrations/falcon-rtr/README.md)
 - [Script arguments and examples](docs/SCRIPT-REFERENCE.md)
 - [Platform support and known limitations](docs/PLATFORMS.md)
 - [Security policy](SECURITY.md)

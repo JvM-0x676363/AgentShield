@@ -1,0 +1,174 @@
+# Falcon Fusion Workflow template for a configuration-only AgentShield rollout.
+#
+# Before import:
+# - Replace <FALCON_HOST_GROUP_ID> with a pilot host group in your tenant.
+# - Upload the reviewed AgentShield package to the Falcon file library as
+#   "agent-shield.zip".
+# - Confirm generic action IDs and property names in your Falcon action catalog.
+# - Keep the workflow manual until the pilot has passed.
+# - Use Falcon's Test view with node mocks before running the first live pilot.
+#   Mocks are tenant-specific runtime test data and are intentionally not
+#   embedded in this reusable template.
+#
+# This file intentionally contains no organization identifiers, schedules,
+# credentials, custom Falcon scripts, or automatic host-removal actions.
+
+name: AgentShield deployment - RTR template
+trigger:
+  next:
+    - DeviceQuery
+  name: On demand
+  type: On demand
+  version_constraint: ~1
+
+actions:
+  DeviceQuery:
+    id: 68ffa99af40c84b36462daa076f535d0
+    default_name: Device Query
+    name: Select pilot endpoints
+    next:
+      - ForEachSensorIDsConcurrently
+    properties:
+      device_status: normal
+      group: <FALCON_HOST_GROUP_ID>
+    version_constraint: ~1
+
+loops:
+  ForEachSensorIDsConcurrently:
+    display: Deploy to each selected sensor concurrently
+    name: Deploy to each selected sensor concurrently
+    for:
+      input: DeviceQuery.devices
+      continue_on_partial_execution: true
+      sequential: false
+    trigger:
+      next:
+        - GetDeviceDetails
+    actions:
+      GetDeviceDetails:
+        id: 6265dc947cc2252f74a5f25261ac36a9
+        default_name: Get device details
+        name: Get device details
+        next:
+          - platform_is_windows
+        properties:
+          device_id: ${DeviceQuery.devices.#}
+        version_constraint: ~1
+
+      PutAgentShieldPackage:
+        id: 1f4e86048c1e676a59f60e961a8c0c15
+        default_name: Put file
+        name: Put AgentShield package
+        next:
+          - RunAgentShieldDeployment
+        properties:
+          device_id: ${DeviceQuery.devices.#}
+          file_name: agent-shield.zip
+          file_path: C:\Windows\Temp
+          queue_offline: false
+        version_constraint: ~1
+
+      RunAgentShieldDeployment:
+        id: 79149e361f8e47bb363847f43009cd1c
+        default_name: Run file
+        name: Deploy AgentShield configuration
+        next:
+          - deployment_succeeded
+          - deployment_failed
+        properties:
+          device_id: ${DeviceQuery.devices.#}
+          file_path: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+          params: >-
+            -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command
+            "& { $ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath
+            'C:\Windows\Temp\agent-shield.zip' -DestinationPath
+            'C:\Windows\Temp\agent-shield' -Force; &
+            'C:\Windows\Temp\agent-shield\deploy.ps1' -Force -SkipTools
+            -SkipVSCode -OutputMode Quiet; exit $LASTEXITCODE }"
+          queue_offline: false
+          csfusion_rtr_timeout: 300
+        version_constraint: ~1
+
+      RunManagedDetector:
+        id: 79149e361f8e47bb363847f43009cd1c
+        default_name: Run file
+        name: Validate AgentShield managed controls
+        next:
+          - managed_controls_compliant
+          - managed_controls_not_compliant
+        properties:
+          device_id: ${DeviceQuery.devices.#}
+          file_path: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+          params: >-
+            -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File
+            C:\Windows\Temp\agent-shield\Test-AgentShieldManaged.ps1
+          queue_offline: false
+          csfusion_rtr_timeout: 60
+        version_constraint: ~1
+
+      WriteSuccessLog:
+        id: 04c59ceb6dff9e6cd89e5f5cf13121ab
+        default_name: Write to log repo
+        name: Record compliant AgentShield deployment
+        properties:
+          _fields:
+            - ${Workflow.Definition.Name}
+            - ${Workflow.Execution.Time}
+            - ${GetDeviceDetails.Hostname}
+            - ${RunAgentShieldDeployment.stdout}
+            - ${RunManagedDetector.stdout}
+          custom_json: null
+        version_constraint: ~1
+
+      WriteFailureLog:
+        id: 04c59ceb6dff9e6cd89e5f5cf13121ab
+        default_name: Write to log repo
+        name: Record AgentShield deployment requiring review
+        properties:
+          _fields:
+            - AgentShield deployment or managed-control verification did not succeed.
+            - ${Workflow.Definition.Name}
+            - ${Workflow.Execution.Time}
+            - ${GetDeviceDetails.Hostname}
+            - ${RunAgentShieldDeployment.stdout}
+            - ${RunAgentShieldDeployment.stderr}
+            - ${RunManagedDetector.stdout}
+            - ${RunManagedDetector.stderr}
+          custom_json: null
+        version_constraint: ~1
+
+    conditions:
+      platform_is_windows:
+        next:
+          - PutAgentShieldPackage
+        expression: GetDeviceDetails.Platform:'Windows'
+        display:
+          - Platform is equal to Windows
+
+      deployment_succeeded:
+        next:
+          - RunManagedDetector
+        expression: "RunAgentShieldDeployment.stdout:*'\"status\":\"success\"*'"
+        display:
+          - Deployment JSON result has status success
+
+      deployment_failed:
+        next:
+          - WriteFailureLog
+        expression: "RunAgentShieldDeployment.stdout:!*'\"status\":\"success\"*'"
+        display:
+          - Deployment JSON result does not have status success
+
+      managed_controls_compliant:
+        next:
+          - WriteSuccessLog
+        expression: "RunManagedDetector.stdout:*'\"compliant\":true*'"
+        display:
+          - Managed-control detector reports compliant true
+
+      managed_controls_not_compliant:
+        next:
+          - WriteFailureLog
+        expression: "RunManagedDetector.stdout:!*'\"compliant\":true*'"
+        display:
+          - Managed-control detector does not report compliant true
