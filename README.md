@@ -4,9 +4,10 @@ Security baselines, deployment tooling, and validation for AI coding agents.
 
 AgentShield helps teams use coding assistants with a consistent security
 baseline across developer workstations and managed endpoints. It configures
-supported agents, protects common secret locations, keeps network access off by
-default in writable Codex sandboxes, installs an audit-only Git hook, and
-validates the package before rollout.
+Claude Code, Claude Desktop, OpenAI Codex CLI, Google Antigravity, and VS Code;
+protects common secret locations; installs an audit-only Git hook; and validates
+the package before rollout. Codex writable sandboxes keep network access off by
+default.
 
 > Local controls improve the developer experience; they do not replace a
 > server-side CI/CD security gate. Treat this repository as a baseline, then
@@ -27,10 +28,15 @@ See [platform notes](docs/PLATFORMS.md) for the current validation status.
 
 ## What it does
 
-- Distributes a concise secure-development baseline and vendor-specific rules.
-- Separates user defaults from administrator-managed enforcement.
-- Denies common secret and credential paths from managed Codex profiles.
-- Keeps writable Codex sandbox networking disabled by default.
+- Distributes a concise secure-development baseline and vendor-specific rules
+  for Claude, Codex, Antigravity, and VS Code.
+- Separates user defaults from administrator-managed enforcement where the
+  agent supports it.
+- Applies Claude permissions and MCP guidance, Codex managed requirements and
+  defaults, Antigravity permissions and MCP guidance, and VS Code security
+  extensions.
+- Denies common secret and credential paths from managed Codex profiles and
+  keeps writable Codex sandbox networking disabled by default.
 - Adds Gitleaks, Semgrep, and Trivy to an audit-only Git pre-commit workflow.
 - Provides deterministic Windows PowerShell and Unix shell deployment engines.
 - Validates manifests, policy, payloads, platform behavior, and installer
@@ -44,16 +50,31 @@ then choose the execution model that matches your endpoint. Source commands use
 
 ### Developer workstation
 
+AgentShield configures every supported target by default. Use `-Only` or
+`--only` when the workstation needs a specific agent. Valid selectors are
+listed with `-ListTargets` or `--list-targets`; `claude-code` and
+`claude-desktop` are separate targets.
+
 Windows PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\install.ps1
+# Codex CLI only
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install.ps1 `
+  -Only codex -SkipTools -SkipVSCode
+
+# Claude Code only
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\install.ps1 `
+  -Only claude-code -SkipTools -SkipVSCode
 ```
 
 Linux or macOS:
 
 ```bash
-bash ./scripts/unix/install.sh
+# Codex CLI only
+bash ./scripts/unix/install.sh --only codex --skip-tools --skip-vscode
+
+# Claude Code only
+bash ./scripts/unix/install.sh --only claude-code --skip-tools --skip-vscode
 ```
 
 Run the installer as an administrator/root account when you need the managed
