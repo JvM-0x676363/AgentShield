@@ -1235,6 +1235,10 @@ for _rel in ("scripts/windows/agent-shield-scan.ps1", "scripts/unix/agent-shield
     check("agent_shield_scan.py" in _wrapper,
           "%s delegates to the shared engine" % _rel)
 
+_unix_scan_wrapper = read("scripts/unix/agent-shield-scan.sh")
+check("sys.exit(0 if sys.version_info[0] == 3 else 1)" in _unix_scan_wrapper,
+      "Unix scanner accepts an available Python 3 runtime")
+
 SCORECARD = "benchmarks/secure-development-journey/scorecard.py"
 SCORECARD_EXAMPLE = "benchmarks/secure-development-journey/report.example.json"
 if check(os.path.isfile(os.path.join(ROOT, SCORECARD)), "exists: %s" % SCORECARD):

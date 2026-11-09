@@ -30,7 +30,7 @@ blocked() {
 
 PYTHON=""
 for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; sys.exit(sys.version_info[0] == 3)' >/dev/null 2>&1; then
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1; then
         PYTHON="$candidate"
         break
     fi
