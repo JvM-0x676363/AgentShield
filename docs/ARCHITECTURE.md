@@ -51,7 +51,9 @@ agent-shield/
 │   ├── SecurityTools.ps1
 │   ├── apply_targets.py
 │   └── security-tools.sh
-├── hooks/        local audit hook
+├── rules/        reviewed offline Semgrep baseline
+├── scripts/      Windows, Unix, and scanner entry points
+├── hooks/        audit hook and installed scanner launcher
 ├── tests/        source, parity, and endpoint verification
 ├── benchmarks/   synthetic security evaluation fixtures
 └── docs/         architecture, operations, platform, and roadmap material

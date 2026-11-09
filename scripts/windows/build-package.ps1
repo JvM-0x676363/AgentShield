@@ -39,13 +39,17 @@ $Files = @(
     "policy/policy.json",
     "policy/tools.json",
     "hooks/pre-commit",
+    "scripts/scan/agent_shield_scan.py",
+    "rules/semgrep/agentshield-baseline.yml",
     "scripts/windows/install.ps1",
     "scripts/windows/deploy.ps1",
+    "scripts/windows/agent-shield-scan.ps1",
     "scripts/windows/Test-AgentShieldManaged.ps1"
 )
 if ($IncludeShell) {
     $Files += "scripts/unix/install.sh"
     $Files += "scripts/unix/deploy.sh"
+    $Files += "scripts/unix/agent-shield-scan.sh"
     $Files += "scripts/unix/Test-AgentShieldManaged.sh"
     $Files += "lib/apply_targets.py"
     $Files += "lib/security-tools.sh"
@@ -124,9 +128,11 @@ function Get-PackageRelativePath {
     switch ($RelativePath) {
         "scripts/windows/install.ps1" { return "install.ps1" }
         "scripts/windows/deploy.ps1" { return "deploy.ps1" }
+        "scripts/windows/agent-shield-scan.ps1" { return "agent-shield-scan.ps1" }
         "scripts/windows/Test-AgentShieldManaged.ps1" { return "Test-AgentShieldManaged.ps1" }
         "scripts/unix/install.sh" { return "install.sh" }
         "scripts/unix/deploy.sh" { return "deploy.sh" }
+        "scripts/unix/agent-shield-scan.sh" { return "agent-shield-scan.sh" }
         "scripts/unix/Test-AgentShieldManaged.sh" { return "Test-AgentShieldManaged.sh" }
         default {
             if ($RelativePath.StartsWith("integrations/falcon-rtr/")) {

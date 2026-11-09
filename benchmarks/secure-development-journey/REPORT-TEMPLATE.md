@@ -59,3 +59,10 @@ findings.
 ## Conclusion
 
 `PASS` / `PARTIAL` / `FAIL` / `ENVIRONMENT_BLOCKED`:
+
+## Structured scorecard record
+
+Copy `report.example.json` to the ignored repository `tmp/` directory, enter
+the scored control values and result for each round, and run `scorecard.py`.
+Record the repository commit used as `benchmark_revision`. Do not paste
+secrets, environment values, or raw scanner output into the JSON record.

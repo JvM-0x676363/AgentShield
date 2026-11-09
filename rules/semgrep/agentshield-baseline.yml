@@ -1,0 +1,31 @@
+rules:
+  - id: python-sql-string-concatenation
+    languages: [python]
+    severity: ERROR
+    message: Build SQL with parameterized queries, not string concatenation.
+    metadata:
+      category: security
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+      owasp: "A03:2021 - Injection"
+    patterns:
+      - pattern-either:
+          - pattern: $CURSOR.execute($SQL + $VALUE, ...)
+          - pattern: $CURSOR.execute($VALUE + $SQL, ...)
+  - id: javascript-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Do not execute dynamic strings with eval.
+    metadata:
+      category: security
+      cwe: "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
+    pattern: eval($INPUT)
+  - id: javascript-child-process-exec
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: Avoid shell execution with child_process.exec; use a constrained API and validated arguments.
+    metadata:
+      category: security
+      cwe: "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+    pattern-either:
+      - pattern: require("child_process").exec($COMMAND, ...)
+      - pattern: $CHILD_PROCESS.exec($COMMAND, ...)

@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Added an offline-capable local scanner runner for Windows, Linux, and macOS.
+  It uses versioned Semgrep rules with temporary state, scans secrets, source,
+  IaC, and dependency surfaces, and returns structured automation results.
+- Added scanner runner and rule verification to endpoint installation checks.
+- Added a reproducible secure-development benchmark scorecard with a versioned,
+  sanitized report format for Codex and Claude comparisons.
+- Documented the Claude Mods threat model and opt-in admission requirements;
+  no executable Mod is deployed by default.
 - Replaced the Falcon workflow baseline with the v3 custom-script flow,
   including package SHA-256 verification, bounded staging cleanup, and typed
   failure states.

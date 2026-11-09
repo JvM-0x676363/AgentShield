@@ -12,6 +12,8 @@ entrypoints to its root for MDM and RTR execution.
 | `scripts/unix/install.sh` | Linux/macOS | Calling user | An interactive developer configures one workstation profile. |
 | `scripts/windows/deploy.ps1` | Windows | Machine and eligible user profiles | Intune, Falcon RTR, SCCM, or a local administrator configures a fleet endpoint. |
 | `scripts/unix/deploy.sh` | Linux/macOS | Machine and eligible user profiles | MDM, SSH, cron, or root configures a fleet endpoint. |
+| `scripts/windows/agent-shield-scan.ps1` | Windows | Current repository | Runs the local Gitleaks, Semgrep, and Trivy baseline with structured results. |
+| `scripts/unix/agent-shield-scan.sh` | Linux/macOS | Current repository | Runs the same local baseline through the portable scanner engine. |
 | `scripts/unix/Test-AgentShieldManaged.sh` | Linux/macOS | Machine managed controls | MDM or RTR validates the Unix managed layer without inspecting user profiles. |
 
 Do not use `install.ps1` from SYSTEM. Use `deploy.ps1 -Force` for SYSTEM,
@@ -116,3 +118,39 @@ On Linux/macOS, use the Python verifier with the profile to inspect:
 ```bash
 sudo python3 tests/verify-install.py --home /home/<user> --expect-managed --output-mode Quiet
 ```
+
+## Local security scan
+
+`agent-shield-scan` is a local, offline-capable baseline. It runs Gitleaks for
+secrets, reviewed versioned Semgrep rules for source code, and Trivy for IaC
+and dependency vulnerabilities. Semgrep receives temporary configuration and
+cache paths for the scan, so it does not need write access to the developer
+profile when invoked from an agent sandbox. Trivy vulnerability scanning needs
+an already-available local database; a missing database is reported as
+`environment_blocked`, never as a clean dependency result.
+
+| Result | Exit code | Meaning |
+|---|---:|---|
+| `clean` | 0 | Every applicable scanner completed without a finding. |
+| `findings` | 1 | At least one scanner found a result and no applicable scanner was blocked. Review the scanner directly for detail. |
+| `not_applicable` | 0 | A scanner had no matching staged surface; inspect the per-scanner JSON status. |
+| `environment_blocked` | 2 | A scanner, its local rules, or its offline database was unavailable. This takes precedence over findings because coverage is incomplete. |
+
+```powershell
+# Windows: JSON result suitable for MDM or RTR collection.
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\agent-shield-scan.ps1 `
+  -Path . -OutputMode Json
+```
+
+For a reviewed benchmark fixture or approved scanner policy, pass an explicit
+Gitleaks configuration. The runner does not automatically trust configuration
+files from the scanned repository.
+
+```bash
+# Linux/macOS: the same contract.
+bash scripts/unix/agent-shield-scan.sh --path . --output-mode Json
+```
+
+Use `-Staged` on Windows or `--staged` on Unix when running the engine directly
+from a Git hook. The installed audit-only hook invokes this mode and still exits
+zero; a CI security gate remains responsible for blocking merges.

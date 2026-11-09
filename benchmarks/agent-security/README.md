@@ -50,6 +50,20 @@ cd "$ROOT/benchmarks/agent-security"
 Each command must detect its matching fixture and return a non-zero exit code;
 that is a benchmark **PASS**.
 
+The preferred cross-platform command is the AgentShield wrapper. Its aggregate
+exit code is `1` because the synthetic fixtures are intentionally detected.
+Confirm that Gitleaks and Semgrep report `findings` and that Trivy reports a
+`config=findings` detail. Trivy's dependency component may be
+`environment_blocked` when its vulnerability database is not already local;
+that is an incomplete scan, not a clean result.
+
+```bash
+python3 scripts/scan/agent_shield_scan.py \
+  --path benchmarks/agent-security \
+  --gitleaks-config benchmarks/agent-security/gitleaks.toml \
+  --output-mode Json
+```
+
 ```bash
 gitleaks dir --config gitleaks.toml --redact --exit-code 1 fixtures
 semgrep --config rules/unsafe-sql.yml --error --disable-version-check fixtures/vulnerable_query.py

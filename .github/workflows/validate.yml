@@ -51,6 +51,7 @@ jobs:
         run: |
           bash -n scripts/unix/install.sh
           bash -n scripts/unix/deploy.sh
+          bash -n scripts/unix/agent-shield-scan.sh
           bash -n scripts/unix/Test-AgentShieldManaged.sh
           bash -n integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh
           bash -n integrations/falcon-rtr/rtr-scripts/AgentShield-Cleanup-Unix.sh
