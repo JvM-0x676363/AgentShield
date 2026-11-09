@@ -215,7 +215,7 @@ run() { if $DRY_RUN; then echo "  [dry-run] $*"; else eval "$@"; fi; }
 # Per-tool configuration lives in targets/*.json + policy/*; installers
 # no longer carry per-tool blocks. Only check roots: the engine validates
 # each manifest and each referenced payload_file/compose.
-for f in "lib/apply_targets.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit"; do
+for f in "lib/apply_targets.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit" "scripts/scan/agent_shield_scan.py" "rules/semgrep/agentshield-baseline.yml"; do
     [[ -f "$SCRIPT_DIR/$f" ]] || { error "File not found: $SCRIPT_DIR/$f"; exit 1; }
 done
 [[ -d "$SCRIPT_DIR/targets" ]] || { error "Directory not found: $SCRIPT_DIR/targets"; exit 1; }
@@ -437,6 +437,8 @@ run "mkdir -p '$GIT_HOOKS_DIR'"
 run "git config --file '$TARGET_HOME/.gitconfig' core.hooksPath '$GIT_HOOKS_DIR'"
 
 PRE_COMMIT="$GIT_HOOKS_DIR/pre-commit"
+SCANNER_RUNNER="$GIT_HOOKS_DIR/agent-shield-scan.py"
+SCANNER_RULES="$GIT_HOOKS_DIR/agent-shield-rules"
 
 # Single source in hooks/pre-commit -- previously duplicated (and divergent) across 4 installers.
 # Byte-by-byte comparison against what WOULD BE written (source with CRLF stripped),
@@ -461,6 +463,14 @@ else
     tr -d '\r' < "$SCRIPT_DIR/hooks/pre-commit" > "$PRE_COMMIT"
     chmod +x "$PRE_COMMIT"
     info "  ✔ $PRE_COMMIT (audit mode: gitleaks + semgrep + trivy)"
+fi
+
+if $DRY_RUN; then
+    echo "  [dry-run] Would install scanner runner and local Semgrep rules"
+else
+    install -m 0644 "$SCRIPT_DIR/scripts/scan/agent_shield_scan.py" "$SCANNER_RUNNER"
+    mkdir -p "$SCANNER_RULES"
+    cp -R "$SCRIPT_DIR/rules/semgrep/." "$SCANNER_RULES/"
 fi
 
 # Git init template

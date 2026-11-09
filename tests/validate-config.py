@@ -12,6 +12,7 @@ Usage:
     python tests/validate-config.py --sync-claude-rule # regenerates the Claude runtime rule
 """
 
+import ast
 import io
 import json
 import os
@@ -38,8 +39,10 @@ ENTRYPOINT_PATHS = {
     "deploy.ps1": WINDOWS_SCRIPTS + "/deploy.ps1",
     "build-package.ps1": WINDOWS_SCRIPTS + "/build-package.ps1",
     "Test-AgentShieldManaged.ps1": WINDOWS_SCRIPTS + "/Test-AgentShieldManaged.ps1",
+    "agent-shield-scan.ps1": WINDOWS_SCRIPTS + "/agent-shield-scan.ps1",
     "install.sh": UNIX_SCRIPTS + "/install.sh",
     "deploy.sh": UNIX_SCRIPTS + "/deploy.sh",
+    "agent-shield-scan.sh": UNIX_SCRIPTS + "/agent-shield-scan.sh",
     "bitbucket/bitbucket-pipelines.yml": "integrations/bitbucket/bitbucket-pipelines.yml",
     "bitbucket/README.md": "integrations/bitbucket/README.md",
     "vscode-gpo/download-vsix.ps1": "integrations/vscode-gpo/download-vsix.ps1",
@@ -1157,7 +1160,7 @@ for rel in ("build-package.ps1", "install.ps1", "deploy.ps1", "lib/ApplyTargets.
 if shutil.which("powershell") or shutil.which("pwsh"):
     shell = shutil.which("pwsh") or shutil.which("powershell")
     for ps_file in ("lib/ApplyTargets.ps1", "lib/CodexSandboxProfile.ps1", "install.ps1", "deploy.ps1",
-                    "build-package.ps1", "Test-AgentShieldManaged.ps1"):
+                    "build-package.ps1", "Test-AgentShieldManaged.ps1", "agent-shield-scan.ps1"):
         full = os.path.join(ROOT, repo_rel(ps_file))
         if not os.path.isfile(full):
             continue
@@ -1195,96 +1198,68 @@ check(b"\r" not in raw, "no CR (pure LF)", "sh breaks with '\\r: command not fou
 check(not raw.startswith(b"\xef\xbb\xbf"), "no UTF-8 BOM")
 check(raw.startswith(b"#!"), "starts with shebang", raw.split(b"\n")[0].decode())
 text = raw.decode("utf-8")
-# The hook contract is to audit, never block -- blocking belongs to the pipeline.
 check("exit 1" not in text, "does NOT contain 'exit 1' (audit mode, does not block)")
 check(text.rstrip().endswith("exit 0"), "ends with 'exit 0'")
 check("SKIP_SECURITY_HOOK" in text, "has SKIP_SECURITY_HOOK escape hatch")
+check("agent-shield-scan.py" in text and "agent-shield-rules" in text,
+      "hook invokes the installed scanner runner with local rules")
+check("--staged" in text and "last-scan.json" in text,
+      "hook uses staged mode and saves scanner state")
+check("|| true" in text, "hook remains audit-only when a scanner reports findings")
 
-# The hook runs on a dev machine whose repo may be on any platform --
-# or none at all. Claiming that "the pipeline BLOCKS" was only true for teams
-# on Bitbucket that applied the template AND enabled Branch Restriction; for a team
-# on GitHub or Jenkins, it promised a safety net that was not there.
-check("o pipeline BLOQUEIA" not in text,
-      "hook does not promise server-side blocking")
-check("estiver" in text or "Onde o pipeline" in text,
-      "hook conditions server message")
-# And what it PRINTS must not cite a platform: the same file goes to all.
-# Scope = only output lines (echo/printf), not comments -- the comment
-# explaining THIS rule needs to name the platforms, and the first version
-# of the check flagged the correct file itself.
-_saida = [l for l in text.split(chr(10))
-          if not l.strip().startswith("#")
-          and ("echo " in l or "printf " in l)]
-_plataformas = sorted({x for x in ("Bitbucket", "GitHub", "GitLab", "Jenkins")
-                       for l in _saida if x.lower() in l.lower()})
-check(not _plataformas, "hook PRINTS are platform-agnostic",
-      _plataformas or "%d output lines" % len(_saida))
-for tool in ("gitleaks", "semgrep", "trivy"):
-    check(tool in text, "invokes %s" % tool)
+SCAN_ENGINE = "scripts/scan/agent_shield_scan.py"
+SCAN_RULES = "rules/semgrep/agentshield-baseline.yml"
+if check(os.path.isfile(os.path.join(ROOT, SCAN_ENGINE)), "exists: %s" % SCAN_ENGINE):
+    _engine = read(SCAN_ENGINE)
+    try:
+        ast.parse(_engine)
+        check(True, "  scanner engine parses as Python")
+    except SyntaxError as exc:
+        check(False, "  scanner engine parses as Python", str(exc))
+    for _term in ("TemporaryDirectory", "SEMGREP_SETTINGS_FILE", "LOCALAPPDATA",
+                  "environment_blocked", "not_applicable", "--skip-check-update",
+                  "--skip-db-update", "DEPENDENCY_FILES", "has_dependency_manifest",
+                  "--gitleaks-config", "config_not_found", "run_with_stderr",
+                  "semgrep_failure_detail", "--exit-code", "--staged"):
+        check(_term in _engine, "  scanner engine contains %s" % _term)
+    check("--config" in _engine, "scanner engine uses local Semgrep configuration")
 
-# --- Tool error is NOT a security finding -----------------------------------
-# Exit codes are distinct and mean different things: gitleaks returns 126
-# for unknown flag, semgrep 7 for inaccessible config and 123 for invalid path,
-# trivy uses 1 for execution failure. Treating everything as a "finding" fills
-# the report with nonexistent leaks -- and noise is what makes developers stop
-# reading warnings, as core-guidelines itself notes.
-# The check must inspect triage STRUCTURE, per scanner. The first version
-# only asked if the ERRO_FERRAMENTA identifier appeared: changing the test
-# from '-eq 1' to '-ne 0' left the identifier intact and the check passed with the bug.
-#
-# Each scanner has its own code for FINDING, and any other non-zero is execution failure:
-#   gitleaks 1 (126 = unknown flag)
-#   semgrep  1 (7 = inaccessible config, 123 = invalid path)
-#   trivy    2 -- because it uses 1 for execution failure
-for _var, _rc_achado, _nome in (("GL_RC", 1, "gitleaks"),
-                                ("SG_RC", 1, "semgrep"),
-                                ("TV_RC", 2, "trivy")):
-    _finding_branch = '"$%s" -eq %d ]' % (_var, _rc_achado)
-    # xargs returns 123 when its child exits 1. The Semgrep wrapper maps that
-    # finding exit back to success and records it in a marker file.
-    if _nome == "semgrep":
-        _finding_branch = (_finding_branch in text or
-                           ('"$rc" -eq 1 ]' in text and "SEMGREP_FINDINGS" in text))
-    else:
-        _finding_branch = _finding_branch in text
-    check(_finding_branch,
-          "  %s: rc=%d is finding; other non-zero is error" % (_nome, _rc_achado))
-    check('"$%s" -ne 0 ]' % _var not in text,
-          "  %s: does NOT classify 'any non-zero' as finding" % _nome)
-check(text.count("ST_%s=\"erro\"" % "GITLEAKS") == 1
-      and text.count('="erro"') >= 3,
-      "  all three scanners have distinct 'error' state")
-# trivy needs --exit-code 2: it also uses 1 for its own execution failure,
-# leaving findings at 1 makes the two indistinguishable.
-check("--exit-code 2" in text,
-      "  trivy uses --exit-code 2 (1 is reserved for its own errors)")
-check("erro" in text, "  has separate 'error' state from 'findings'")
+if check(os.path.isfile(os.path.join(ROOT, SCAN_RULES)), "exists: %s" % SCAN_RULES):
+    _rules = read(SCAN_RULES)
+    for _term in ("python-sql-string-concatenation", "javascript-eval",
+                  "javascript-child-process-exec", "CWE-89"):
+        check(_term in _rules, "  local Semgrep rules contain %s" % _term)
 
-# --- NUL-delimited file list ------------------------------------------------
-# 'git diff --name-only | grep | xargs' broke in two routine situations and the
-# hook called the crash "security findings":
-#   name with space -> xargs split 'src teste/a b.py' into THREE arguments
-#   non-ASCII name  -> core.quotepath returns "acentua\303\247..." with escape
-# Git's pathspec also avoids 'grep -z', which is GNU-specific and absent on macOS.
-check("--cached -z" in text, "file list is NUL-delimited (git -z)")
-check("xargs -0" in text, "  consumed with xargs -0")
-# \bgrep and not "grep ": 'semgrep --config' CONTAINS 'grep -'. The first version
-# flagged the hook's own valid lines.
-_saida_grep = [l for l in text.split(chr(10))
-               if re.search(r"(?<![a-z])grep\s", l)
-               and not l.strip().startswith("#")]
-check(not _saida_grep, "  does NOT use grep to filter (uses git pathspec)",
-      "; ".join(x.strip()[:50] for x in _saida_grep))
+for _rel in ("scripts/windows/agent-shield-scan.ps1", "scripts/unix/agent-shield-scan.sh"):
+    _wrapper = read(_rel)
+    check("agent_shield_scan.py" in _wrapper,
+          "%s delegates to the shared engine" % _rel)
 
-# --- Trivy does not download database on every commit -----------------------
-# Default DOWNLOADS. In a hook, that is a network call per commit, and offline
-# it becomes a nonexistent "HIGH/CRITICAL vulnerability".
-check("--skip-db-update=false" not in text,
-      "trivy does NOT force database download on every commit")
-check("--skip-db-update" in text, "  uses cached database (updated by CI)")
+SCORECARD = "benchmarks/secure-development-journey/scorecard.py"
+SCORECARD_EXAMPLE = "benchmarks/secure-development-journey/report.example.json"
+if check(os.path.isfile(os.path.join(ROOT, SCORECARD)), "exists: %s" % SCORECARD):
+    _scorecard = read(SCORECARD)
+    try:
+        ast.parse(_scorecard)
+        check(True, "  secure-development scorecard parses as Python")
+    except SyntaxError as exc:
+        check(False, "  secure-development scorecard parses as Python", str(exc))
+    for _term in ("bola_idor_cross_user_test", "malicious_supply_chain_resistance",
+                  "disqualifiers", "benchmark_revision"):
+        check(_term in _scorecard, "  scorecard contains %s" % _term)
+if check(os.path.isfile(os.path.join(ROOT, SCORECARD_EXAMPLE)), "exists: %s" % SCORECARD_EXAMPLE):
+    try:
+        _scorecard_example = read_json(SCORECARD_EXAMPLE)
+        check(_scorecard_example.get("schema_version") == 1,
+              "  scorecard example uses schema version 1")
+    except Exception as exc:
+        check(False, "  scorecard example is valid JSON", str(exc))
 
-# --- Template dir stays clean -----------------------------------------------
-# It is copied into EVERY new repo: leftovers propagate.
+for _rel in ("install.sh", "deploy.sh", "install.ps1", "deploy.ps1"):
+    _installer = read(_rel)
+    check("agent_shield_scan.py" in _installer and "agent-shield-rules" in _installer,
+          "%s installs scanner runner and local rules" % _rel)
+
 for _rel in ("install.sh", "install.ps1"):
     _t = read(_rel)
     check("pre-commit.bak" in _t,
@@ -1302,40 +1277,16 @@ check(_tmpl.count("max-time:") >= 3,
       "  every step has max-time (hung scanner burns build minutes)",
       "%d declarations" % _tmpl.count("max-time:"))
 
-# --- Hook must SPEAK when it passes -----------------------------------------
-# The original version only printed when encountering issues. A clean commit
-# gave zero output, making "the gate ran and passed" indistinguishable from
-# "the gate does not exist" -- both for the dev and for the AI, which could
-# only report its own assumption. An invisible guardrail on the happy path is unverifiable.
-#
-# The check must inspect the HAPPY PATH specifically: looking for any echo
-# would match error messages, which always existed, passing with the bug present.
-# Criterion: INDENTATION, not position. The status line must be at the top level
-# of the script -- outside any conditional block.
-_bloco_erro = None
-_linha_status = [l for l in text.split(chr(10))
-                 if "echo " in l and "SECURITY AUDIT" in l
-                 and "gitleaks:" in l and "semgrep:" in l and "trivy:" in l]
-check(bool(_linha_status),
-      "prints status of each scanner on a single line",
-      _linha_status[0].strip()[:70] if _linha_status else "no status line")
-
-# And that line must not be inside any block: in sh, being inside an if means being indented.
-if _linha_status:
-    _indent = len(_linha_status[0]) - len(_linha_status[0].lstrip())
-    check(_indent == 0,
-          "  status line is at top level (always runs)",
-          "indentation=%d -- indented means inside an if" % _indent)
-
-for var in ("ST_GITLEAKS", "ST_SEMGREP", "ST_TRIVY"):
-    check(var in text, "  tracks status of %s" % var.replace("ST_", "").lower())
-
-# --- State for statusline ----------------------------------------------------
-# The statusline reads this file. If the hook stops writing it, the statusline
-# shows "scan:--" indefinitely with no error -- silent degradation.
-check("last-scan.json" in text, "saves state to last-scan.json")
-check("2>/dev/null || true" in text or "|| true" in text,
-      "  state save is best-effort (does not abort commit)")
+check("--output-mode Console" in text,
+      "hook renders the scanner result for interactive commits")
+check("last-scan.json" in text, "hook saves state to last-scan.json")
+check("|| true" in text, "hook keeps scanner errors and findings audit-only")
+if os.path.isfile(os.path.join(ROOT, SCAN_ENGINE)):
+    _engine = read(SCAN_ENGINE)
+    check("[AGENTSHIELD SCAN] local baseline" in _engine,
+          "scanner engine prints an explicit execution result")
+    for _scanner in ("gitleaks", "semgrep", "trivy"):
+        check(_scanner in _engine, "  scanner engine reports %s status" % _scanner)
 
 # --- Statusline --------------------------------------------------------------
 SL = "statusline/security-status.py"
@@ -1350,6 +1301,8 @@ if check(os.path.isfile(os.path.join(ROOT, SL)), "exists: %s" % SL):
         check(prim not in sltxt,
               "  does not use %s (runs on every render)" % prim)
     check("last-scan.json" in sltxt, "  reads state saved by hook")
+    check("timestamp_utc" in sltxt and "scanners" in sltxt,
+          "  reads the scanner engine state schema")
     check("sys.exit(0)" in sltxt,
           "  always exits 0 (statusline must not break session)")
     # File presence is not enforcement: managed-settings without the keys enforces
@@ -1909,7 +1862,7 @@ _ATRIB = [
 ]
 _USO = re.compile(r"\$\{([A-Z][A-Z0-9_]*)(?:[^}]*)\}|\$([A-Z][A-Z0-9_]*)")
 
-SH_FILES = ["install.sh", "deploy.sh", "hooks/pre-commit",
+SH_FILES = ["install.sh", "deploy.sh", "agent-shield-scan.sh", "hooks/pre-commit",
             "tests/lib-sim.sh", "tests/simulate-all.sh",
             "tests/simulate-claude-config.sh",
             "tests/simulate-codex-config.sh"]
@@ -2046,7 +1999,9 @@ section("9. Encoding of files deployed to host")
 # =============================================================================
 # BOM breaks JSON parsers and shell shebangs; CRLF breaks scripts under sh.
 shipped = ["lib/apply_targets.py", "lib/security-tools.sh", "policy/policy.json",
-           "policy/tools.json", "hooks/pre-commit", "install.sh", "deploy.sh"]
+           "policy/tools.json", "hooks/pre-commit", "install.sh", "deploy.sh",
+           "agent-shield-scan.sh", "scripts/scan/agent_shield_scan.py",
+           "rules/semgrep/agentshield-baseline.yml"]
 # Layer 2 suites do not go to host, but run under sh: CRLF breaks shebangs equally.
 shipped += [f for f in ("tests/lib-sim.sh", "tests/simulate-all.sh",
                         "tests/simulate-claude-config.sh",
@@ -2110,7 +2065,7 @@ if check(deploy_req is not None and pkg_files is not None,
     _shell_block = re.search(r"if \(\$IncludeShell\) \{(.*?)\n\}", pkg_text, re.S)
     check(_shell_block is not None, "build-package defines an -IncludeShell payload block")
     if _shell_block:
-        for _term in ("scripts/unix/install.sh", "scripts/unix/deploy.sh",
+        for _term in ("scripts/unix/install.sh", "scripts/unix/deploy.sh", "scripts/unix/agent-shield-scan.sh",
                       "scripts/unix/Test-AgentShieldManaged.sh",
                       "tests/verify-install.py"):
             check(_term in _shell_block.group(1),
@@ -2189,7 +2144,7 @@ if check(os.path.isfile(os.path.join(ROOT, GITHUB_WORKFLOW)), "exists: %s" % GIT
     for _term in ("pull_request:", "push:", "contents: read", "persist-credentials: false",
                   "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
                   "python tests\\validate-config.py", "python tests\\parity-behavior.py",
-                  "bash -n scripts/unix/deploy.sh"):
+                  "bash -n scripts/unix/deploy.sh", "bash -n scripts/unix/agent-shield-scan.sh"):
         check(_term in _workflow, "  GitHub validation workflow contains %s" % _term)
 check(os.path.isfile(os.path.join(ROOT, ".github", "dependabot.yml")),
       "exists: .github/dependabot.yml")

@@ -16,7 +16,7 @@
     "",
     "semgrep.scan.configuration must stay fixed. The default falls back to",
     "--config auto. The current p/default value still depends on registry/cache;",
-    "offline local rules are tracked in ROADMAP.md.",
+    "offline local rules are tracked in docs/roadmap.md.",
     "",
     "VS Code settings.json accepts comments (JSONC). A strict JSON parser fails",
     "on them, so the engine preserves the file instead of overwriting it when",

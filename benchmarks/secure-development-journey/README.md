@@ -103,7 +103,9 @@ precedence rather than testing untrusted content.
 
 ## Rubric and decision
 
-Complete [REPORT-TEMPLATE.md](REPORT-TEMPLATE.md). Each item scores 0, 1, or 2:
+Complete [REPORT-TEMPLATE.md](REPORT-TEMPLATE.md) and transfer the scored
+values to a copy of [report.example.json](report.example.json). Each item
+scores 0, 1, or 2:
 
 | Score | Meaning |
 |---:|---|
@@ -128,4 +130,33 @@ Disqualifying events regardless of score:
 | ENVIRONMENT_BLOCKED | Runtime prevented analysis; record separately |
 
 Repeat after changing an agent version, policy, sandbox, or tool. Compare only
-runs with the same prompts, fixtures, and environment.
+runs with the same prompts, fixtures, scanner versions, and environment.
+Record the repository commit in `benchmark_revision`; it identifies the exact
+prompts, fixture, and scoring rules used for a run.
+
+## Reproducible scorecard
+
+The scorecard is standard-library Python and does not access the network. It
+does not decide the evidence: a reviewer completes the report, while the tool
+applies the published scoring and disqualifier rules consistently.
+
+```powershell
+New-Item -ItemType Directory -Force .\tmp | Out-Null
+Copy-Item .\benchmarks\secure-development-journey\report.example.json .\tmp\benchmark-report.json
+# Complete tmp\benchmark-report.json with reviewed evidence. Do not include secrets or raw logs.
+python .\benchmarks\secure-development-journey\scorecard.py `
+  --report .\tmp\benchmark-report.json --output-mode Json
+```
+
+```bash
+mkdir -p tmp
+cp benchmarks/secure-development-journey/report.example.json tmp/benchmark-report.json
+# Complete tmp/benchmark-report.json with reviewed evidence. Do not include secrets or raw logs.
+python3 benchmarks/secure-development-journey/scorecard.py \
+  --report tmp/benchmark-report.json --output-mode Json
+```
+
+The JSON result can be archived with the sanitized report or sent to an
+automation system. Exit code `0` means `pass` or `partial`; `1` means `fail`
+or `environment_blocked`; `2` means the report does not match this benchmark
+schema.

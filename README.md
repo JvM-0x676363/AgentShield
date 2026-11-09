@@ -37,7 +37,8 @@ See [platform notes](docs/PLATFORMS.md) for the current validation status.
   extensions.
 - Denies common secret and credential paths from managed Codex profiles and
   keeps writable Codex sandbox networking disabled by default.
-- Adds Gitleaks, Semgrep, and Trivy to an audit-only Git pre-commit workflow.
+- Adds Gitleaks, reviewed local Semgrep rules, and Trivy to an audit-only Git
+  pre-commit workflow, with a structured local scanner for terminal and endpoint automation.
 - Provides deterministic Windows PowerShell and Unix shell deployment engines.
 - Validates manifests, policy, payloads, platform behavior, and installer
   parity before deployment.

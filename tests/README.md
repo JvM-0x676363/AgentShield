@@ -46,6 +46,13 @@ existing configuration or credential material.
 remote responder. `--output-mode Quiet` emits only the final result. The
 legacy `--quiet` option remains a compact console view.
 
+## Local scanner baseline
+
+`agent-shield-scan` is the shared engine used by the audit-only Git hook. It
+uses temporary Semgrep state rather than the developer profile, reviewed local
+rules, Trivy IaC and dependency checks, and a stable result vocabulary: `clean`, `findings`,
+`not_applicable`, and `environment_blocked`. See [the script reference](../docs/SCRIPT-REFERENCE.md#local-security-scan) for platform commands and exit codes.
+
 For Windows endpoint-management detection, run
 `Test-AgentShieldManaged.ps1`. It verifies the machine-managed controls without
 Python or user-profile access; use `verify-install.py` for the full endpoint

@@ -178,7 +178,7 @@ info "System: $OS"
 # --- Source file validation ---
 # Per-tool configuration lives in targets/*.json + policy/*. Only check roots:
 # the engine validates each manifest and each referenced payload_file/compose.
-for f in "lib/apply_targets.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit"; do
+for f in "lib/apply_targets.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit" "scripts/scan/agent_shield_scan.py" "rules/semgrep/agentshield-baseline.yml"; do
     [[ -f "$SCRIPT_DIR/$f" ]] || { error "File not found: $SCRIPT_DIR/$f"; exit 1; }
 done
 [[ -d "$SCRIPT_DIR/targets" ]] || { error "Directory not found: $SCRIPT_DIR/targets"; exit 1; }
@@ -406,6 +406,8 @@ install_for_user() {
     $DRY_RUN || { mkdir -p "$hooks_dir"; chown "$username" "$hooks_dir"; }
 
     local pre_commit="$hooks_dir/pre-commit"
+    local scanner_runner="$hooks_dir/agent-shield-scan.py"
+    local scanner_rules="$hooks_dir/agent-shield-rules"
     # Single source in hooks/pre-commit -- previously duplicated (and divergent) across 4 installers.
     # Byte-by-byte comparison against what WOULD BE written, so an existing hook in CRLF
     # is rewritten in LF rather than reported as up to date.
@@ -429,6 +431,15 @@ install_for_user() {
         tr -d '\r' < "$SCRIPT_DIR/hooks/pre-commit" > "$pre_commit"
         chmod +x "$pre_commit"
         chown "$username" "$pre_commit"
+    fi
+
+    if $DRY_RUN; then
+        echo "  [dry-run] scanner runner and local Semgrep rules would be installed"
+    else
+        install -m 0644 "$SCRIPT_DIR/scripts/scan/agent_shield_scan.py" "$scanner_runner"
+        mkdir -p "$scanner_rules"
+        cp -R "$SCRIPT_DIR/rules/semgrep/." "$scanner_rules/"
+        chown -R "$username" "$scanner_rules" "$scanner_runner"
     fi
 
     # Git configuration for user

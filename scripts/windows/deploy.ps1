@@ -161,7 +161,7 @@ if (-not $isAdmin) {
 # --- Validation of source files (before touching any profile) ---
 # Per-tool configuration lives in targets\*.json + policy\*. Only check roots:
 # the engine validates each manifest and each referenced payload_file/compose.
-$required = @("lib\ApplyTargets.ps1", "lib\SecurityTools.ps1", "lib\CodexSandboxProfile.ps1", "policy\core-guidelines.md", "policy\policy.json", "policy\tools.json", "hooks\pre-commit")
+$required = @("lib\ApplyTargets.ps1", "lib\SecurityTools.ps1", "lib\CodexSandboxProfile.ps1", "policy\core-guidelines.md", "policy\policy.json", "policy\tools.json", "hooks\pre-commit", "scripts\scan\agent_shield_scan.py", "rules\semgrep\agentshield-baseline.yml")
 foreach ($f in $required) {
     if (-not (Test-Path (Join-Path $ScriptDir $f))) {
         Err "File not found: $(Join-Path $ScriptDir $f)"
@@ -177,6 +177,8 @@ if (-not (Test-Path (Join-Path $ScriptDir "targets"))) {
 # Read sources once. CLAUDE.md was removed from here: the engine composes
 # guidelines (core + vendor appendix) from policy\.
 $SrcHook       = [System.IO.File]::ReadAllText((Join-Path $ScriptDir "hooks\pre-commit"))
+$SrcScanRunner = Join-Path $ScriptDir "scripts\scan\agent_shield_scan.py"
+$SrcScanRules  = Join-Path $ScriptDir "rules\semgrep"
 
 # Detection functions
 
@@ -500,6 +502,16 @@ foreach ($user in $targetUsers) {
         # --- Git hooks (audit mode) ---
         if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $userHooksDir | Out-Null }
         $userPreCommit = Join-Path $userHooksDir "pre-commit"
+        $userScanRunner = Join-Path $userHooksDir "agent-shield-scan.py"
+        $userScanRules = Join-Path $userHooksDir "agent-shield-rules"
+
+        if (-not $DryRun) {
+            Copy-Item -LiteralPath $SrcScanRunner -Destination $userScanRunner -Force
+            New-Item -ItemType Directory -Force -Path $userScanRules | Out-Null
+            Copy-Item -Path (Join-Path $SrcScanRules "*") -Destination $userScanRules -Recurse -Force
+        } else {
+            Info "    [dry-run] scanner runner and local Semgrep rules would be installed"
+        }
 
         # Source can be CRLF (checkout on Windows); installed hook must always
         # be LF, otherwise sh.exe breaks on shebang.

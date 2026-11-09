@@ -115,7 +115,7 @@ Info "Run ID: $script:RunId"
 Write-AgentShieldEvent -Event "start"
 
 # --- Source file validation ---
-$required = @("lib\ApplyTargets.ps1", "lib\SecurityTools.ps1", "lib\CodexSandboxProfile.ps1", "policy\core-guidelines.md", "policy\policy.json", "policy\tools.json", "hooks\pre-commit")
+$required = @("lib\ApplyTargets.ps1", "lib\SecurityTools.ps1", "lib\CodexSandboxProfile.ps1", "policy\core-guidelines.md", "policy\policy.json", "policy\tools.json", "hooks\pre-commit", "scripts\scan\agent_shield_scan.py", "rules\semgrep\agentshield-baseline.yml")
 foreach ($f in $required) {
     $fullPath = Join-Path $ScriptDir $f
     if (-not (Test-Path $fullPath)) {
@@ -263,14 +263,22 @@ Write-Host "`n[Git Global Hooks - Audit Mode]" -ForegroundColor Cyan
 
 $PreCommit = Join-Path $HooksDir "pre-commit"
 $srcHook   = Join-Path $ScriptDir "hooks\pre-commit"
+$ScannerRunner = Join-Path $ScriptDir "scripts\scan\agent_shield_scan.py"
+$ScannerRules = Join-Path $ScriptDir "rules\semgrep"
+$InstalledScannerRunner = Join-Path $HooksDir "agent-shield-scan.py"
+$InstalledScannerRules = Join-Path $HooksDir "agent-shield-rules"
 
 Info "Configuring core.hooksPath -> $HooksDir"
 if (-not $DryRun) {
     New-Item -ItemType Directory -Force -Path $HooksDir | Out-Null
     git config --global core.hooksPath $HooksDir
+    Copy-Item -LiteralPath $ScannerRunner -Destination $InstalledScannerRunner -Force
+    New-Item -ItemType Directory -Force -Path $InstalledScannerRules | Out-Null
+    Copy-Item -Path (Join-Path $ScannerRules "*") -Destination $InstalledScannerRules -Recurse -Force
 } else {
     Info "  [dry-run] mkdir $HooksDir"
     Info "  [dry-run] git config --global core.hooksPath $HooksDir"
+    Info "  [dry-run] install scanner runner and local Semgrep rules"
 }
 
 $srcHookLf    = [System.IO.File]::ReadAllText($srcHook) -replace "`r`n", "`n"
