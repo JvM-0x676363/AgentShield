@@ -19,7 +19,7 @@ default.
 |---|---|---|
 | Claude Code | Instructions, permissions, MCP | Managed settings |
 | Claude Desktop | MCP | Not available in product |
-| OpenAI Codex CLI | `AGENTS.md` and managed defaults | `requirements.toml` |
+| OpenAI Codex CLI | `AGENTS.md`; Windows defaults stay user-owned | `requirements.toml` |
 | Google Antigravity | Permissions and MCP | Not available in product |
 | VS Code | Security extensions | GPO baseline available |
 
@@ -80,6 +80,17 @@ bash ./scripts/unix/install.sh --only claude-code --skip-tools --skip-vscode
 Run the installer as an administrator/root account when you need the managed
 enforcement layer. A non-privileged run still applies user-scoped defaults and
 reports that managed enforcement was not applied.
+
+### Codex on Windows
+
+Select **Workspace write**, **Ask for approval**, disabled sandbox network
+access, and cached web search in Codex Settings. This lets Codex work through
+ordinary workspace changes without granting network or full-filesystem access.
+If the desktop client offers **Approve for me**, it may be selected by the user
+to send eligible approvals to automatic review. The sandbox boundary remains
+the same. AgentShield enforces the permitted profiles and command restrictions
+through `%ProgramData%\OpenAI\Codex\requirements.toml`; it does not overwrite
+the developer-owned `~/.codex/config.toml`.
 
 ### Fleet deployment
 

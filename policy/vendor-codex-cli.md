@@ -41,7 +41,7 @@ Two separate admin files, with different strength:
 | File | Windows | Unix (Linux/macOS) | Strength |
 |---|---|---|---|
 | `requirements.toml` | `%ProgramData%\OpenAI\Codex\requirements.toml` | `/etc/codex/requirements.toml` | Users **cannot** override. A conflicting local value falls back to a compatible one and the user is notified. |
-| `managed_config.toml` | `~/.codex/managed_config.toml` | `/etc/codex/managed_config.toml` | Defaults only. The user may change them mid-session; they reapply at next startup. |
+| Managed defaults | Settings UI or user `~/.codex/config.toml` | `/etc/codex/managed_config.toml` | Defaults only. Windows defaults remain user-owned; Unix defaults reapply at startup. |
 
 Admins can constrain approval policies and reviewers, sandbox modes, permission
 profiles, web search modes, the MCP server allowlist, plugin marketplace
@@ -75,8 +75,10 @@ weaker network isolation and does not support denied read paths.
 
 - **We never write `~/.codex/config.toml`.** A duplicate key in TOML is a parse
   error, not a last-one-wins override. Appending our block to a config the dev
-  already customized would leave a file Codex cannot load. Everything we ship
-  goes to `managed_config.toml` and `requirements.toml`, which are ours.
+  already customized would leave a file Codex cannot load. Current Windows
+  clients ignore `managed_config.toml`, so AgentShield only enforces
+  `requirements.toml` there. Unix managed defaults remain in the system-owned
+  `managed_config.toml`.
 - **`~/.codex/AGENTS.override.md` wins over `~/.codex/AGENTS.md`.** If a dev has
   the override file, our global guidance is silently ignored - the installer
   detects this and warns. A repo-level `AGENTS.md` also takes precedence over

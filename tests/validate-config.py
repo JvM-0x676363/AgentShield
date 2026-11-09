@@ -402,6 +402,13 @@ if os.path.isfile(os.path.join(ROOT, req)) and tomllib:
         _defaults = tomllib.load(fh)
     check("sandbox_mode" not in _defaults,
           "managed defaults: does not select legacy sandbox_mode")
+    _codex_user_specs = manifests.get("codex-user", {}).get("files", [])
+    _windows_legacy_defaults = [f for f in _codex_user_specs
+                                if f.get("dest", {}).get("windows", "").endswith(
+                                    ".codex/managed_config.toml")]
+    check(not _windows_legacy_defaults,
+          "Codex Windows target does not write deprecated managed_config.toml",
+          _windows_legacy_defaults or "")
     _codex_vendor = read("policy/vendor-codex-cli.md")
     check("Codex 0.138.0+ is mandatory" in _codex_vendor,
           "Codex documentation declares minimum version for new pattern")

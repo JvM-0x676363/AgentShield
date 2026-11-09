@@ -1,6 +1,10 @@
-# security-team-block -- source for the Codex CLI managed_config.toml
-# Referenced by targets/codex-managed.json on Unix and targets/codex-user.json
-# on Windows, where this file lives in ~/.codex rather than ProgramData.
+# security-team-block -- source for the Unix Codex CLI managed_config.toml
+# Referenced by targets/codex-managed.json on Linux and macOS.
+#
+# Current Windows clients ignore ~/.codex/managed_config.toml. Windows defaults
+# are intentionally left to the user-facing Settings UI or config.toml; the
+# endpoint package continues to enforce requirements.toml without overwriting
+# developer-owned configuration.
 #
 # These are defaults, not enforcement. Users may change them during a session;
 # requirements.toml controls non-overridable restrictions.
