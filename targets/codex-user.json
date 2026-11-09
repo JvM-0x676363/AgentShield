@@ -19,10 +19,11 @@
     "would leave Codex unable to load it. We write only files owned by this",
     "package.",
     "",
-    "managed_config.toml appears here rather than in codex-managed.json because",
-    "on Windows it lives in ~/.codex, not ProgramData. On Unix the equivalent",
-    "lives in /etc/codex and is applied there, so the destination below covers",
-    "Windows only."
+    "Current Windows clients ignore ~/.codex/managed_config.toml. Windows",
+    "defaults remain developer-owned and are selected through the Settings UI",
+    "or ~/.codex/config.toml; AgentShield never patches config.toml because",
+    "duplicate TOML keys would break Codex startup. Unix managed defaults are",
+    "still applied by codex-managed.json under /etc/codex."
   ],
   "files": [
     {
@@ -61,15 +62,6 @@
         "policy/core-runtime.md",
         "policy/vendor-codex-cli.md"
       ]
-    },
-    {
-      "dest": {
-        "windows": "${HOME}/.codex/managed_config.toml"
-      },
-      "format": "toml",
-      "strategy": "overwrite",
-      "backup": true,
-      "payload_file": "policy/codex-managed-defaults.toml"
     }
   ],
   "preflight": [
@@ -81,6 +73,13 @@
         "darwin": "${HOME}/.codex/AGENTS.override.md"
       },
       "message": "AGENTS.override.md takes precedence over AGENTS.md, so the security guidance will be silently ignored. Move its content into AGENTS.md or remove the override."
+    },
+    {
+      "type": "warn-if-exists",
+      "path": {
+        "windows": "${HOME}/.codex/managed_config.toml"
+      },
+      "message": "Current Windows Codex ignores managed_config.toml. AgentShield no longer writes or removes this developer-profile file. If its first line is the AgentShield security-team-block header, rename it to a backup after review."
     }
   ],
   "notes": [

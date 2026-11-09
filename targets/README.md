@@ -66,8 +66,10 @@ exclusive enterprise MCP configuration in Claude Code. Stopping future writes
 does not remove a file that was already deployed.
 
 No target writes `~/.codex/config.toml`: duplicate TOML keys are parse errors.
-AgentShield uses files it owns, `managed_config.toml` and `requirements.toml`,
-instead of modifying developer-owned configuration.
+AgentShield uses `requirements.toml` for Codex enforcement. On Linux and macOS,
+it also owns `/etc/codex/managed_config.toml` for defaults. Current Windows
+clients ignore `~/.codex/managed_config.toml`; Windows defaults stay in the
+Settings UI or developer-owned `config.toml`, which the installer does not edit.
 
 ## Selectors
 
