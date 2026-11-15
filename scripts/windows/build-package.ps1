@@ -33,6 +33,7 @@ function Sec($m)  { Write-Host "`n== $m ==" -ForegroundColor Cyan }
 # Files required by deploy.ps1. The package stages entry points at the ZIP root.
 $Files = @(
     "lib/ApplyTargets.ps1",
+    "lib/RollbackReceipt.ps1",
     "lib/SecurityTools.ps1",
     "lib/CodexSandboxProfile.ps1",
     "policy/core-guidelines.md",
@@ -52,6 +53,7 @@ if ($IncludeShell) {
     $Files += "scripts/unix/agent-shield-scan.sh"
     $Files += "scripts/unix/Test-AgentShieldManaged.sh"
     $Files += "lib/apply_targets.py"
+    $Files += "lib/rollback_receipt.py"
     $Files += "lib/security-tools.sh"
     $Files += "tests/verify-install.py"
 }

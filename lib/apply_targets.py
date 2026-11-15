@@ -28,6 +28,10 @@ import shutil
 import sys
 import time
 
+from rollback_receipt import ensure_private_directory, record_appended_block, record_created_file, record_json_added_keys
+
+RECEIPT_DIR = None
+
 # --- output ------------------------------------------------------------------
 # No color when stdout is not a TTY (remote runners like RTR/SCCM capture stdout).
 _TTY = sys.stdout.isatty()
@@ -153,8 +157,23 @@ def write_text(path, content, dry_run):
         detail(f"[dry-run] would write {path} ({len(content)} bytes)")
         return
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
+    created = not os.path.lexists(path)
+    if RECEIPT_DIR:
+        try:
+            ensure_private_directory(RECEIPT_DIR)
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt unavailable: {exc}") from exc
+        if not created:
+            existing = os.lstat(path)
+            if not os.path.isfile(path) or existing.st_nlink != 1 or os.path.islink(path):
+                raise TargetError("unsafe destination type")
+    with open(path, "x" if RECEIPT_DIR and created else "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
+    if RECEIPT_DIR and created:
+        try:
+            record_created_file(path, content.encode("utf-8"), RECEIPT_DIR)
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
 
 
 def dump_json(obj):
@@ -306,13 +325,23 @@ def strat_merge_missing_keys(spec, dst, root, dry_run):
     if not isinstance(data, dict):
         raise TargetError(f"{dst}: expected top-level object")
 
-    backup(dst, dry_run)
     added = [k for k in payload if k not in data]
+    if not added:
+        return "unchanged (keys already present)"
+    if not RECEIPT_DIR:
+        backup(dst, dry_run)
     for k in added:
         data[k] = payload[k]
 
-    write_text(dst, dump_json(data), dry_run)
-    return f"merged (+{len(added)} keys)" if added else "unchanged (keys already present)"
+    content = dump_json(data)
+    write_text(dst, content, dry_run)
+    if RECEIPT_DIR and not dry_run:
+        try:
+            record_json_added_keys(dst, content.encode("utf-8"), RECEIPT_DIR,
+                                   {key: payload[key] for key in added})
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
+    return f"merged (+{len(added)} keys)"
 
 
 def strat_md_block(spec, dst, root, dry_run):
@@ -331,7 +360,8 @@ def strat_md_block(spec, dst, root, dry_run):
         return "created"
 
     existing = read_text(dst)
-    if marker in existing:
+    marker_present = marker in existing
+    if marker_present:
         first = existing.index(marker)
         rest = existing[first + len(marker):]
         if marker in rest:
@@ -341,8 +371,19 @@ def strat_md_block(spec, dst, root, dry_run):
             return "block updated"
         warn(f"  unclosed opening marker in {os.path.basename(dst)} -- appending new block")
 
-    content = existing.rstrip("\n") + "\n\n" + block
+    content = existing + ("\n" if existing.endswith("\n") else "\n\n") + block
+    prior_bytes = None
+    if RECEIPT_DIR and not dry_run and not marker_present:
+        with open(dst, "rb") as source:
+            prior_bytes = source.read()
+        if not content.encode("utf-8").startswith(prior_bytes):
+            prior_bytes = None
     write_text(dst, content, dry_run)
+    if prior_bytes is not None:
+        try:
+            record_appended_block(dst, prior_bytes, content.encode("utf-8"), RECEIPT_DIR)
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
     return "block appended"
 
 
@@ -601,6 +642,7 @@ def print_target_list(targets, os_key):
 
 
 def main():
+    global RECEIPT_DIR
     ap = argparse.ArgumentParser(description="Applies targets/*.json manifests.")
     ap.add_argument("--root", default=".", help="repository root path")
     ap.add_argument("--scope", choices=["user", "machine", "all"], default="all")
@@ -612,7 +654,9 @@ def main():
     ap.add_argument("--list-targets", action="store_true",
                     help="lists available targets and selectors, then exits")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--receipt-dir", help="private directory for per-write rollback receipts")
     args = ap.parse_args()
+    RECEIPT_DIR = os.path.abspath(args.receipt_dir) if args.receipt_dir and not args.dry_run else None
 
     root = os.path.abspath(args.root)
     all_targets = load_all_targets(root)

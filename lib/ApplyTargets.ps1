@@ -32,7 +32,8 @@ param(
     # | group (managed) | target id. Default all.
     [string[]] $Only = @("all"),
     [switch]   $ListTargets,
-    [switch]   $DryRun
+    [switch]   $DryRun,
+    [string]   $ReceiptDir
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +52,10 @@ function Get-CurrentOs {
     }
     if ($IsMacOS) { return "darwin" }
     return "linux"
+}
+if ($ReceiptDir) {
+    if ((Get-CurrentOs) -ne 'windows') { throw 'windows_receipt_mode_only' }
+    . (Join-Path $PSScriptRoot 'RollbackReceipt.ps1')
 }
 
 function Test-IsAdmin {
@@ -79,7 +84,30 @@ function Write-OrPreview {
         Detail "[dry-run] $Verbo $Path ($($Content.Length) bytes)"
         return
     }
-    Write-Utf8NoBom -Path $Path -Content $Content
+    if (-not $ReceiptDir) {
+        Write-Utf8NoBom -Path $Path -Content $Content
+        return
+    }
+    Assert-AgentShieldPrivateReceiptPath -LiteralPath $ReceiptDir -Directory
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    Assert-AgentShieldDestinationParents -Destination $Path
+    $existing = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $existing) {
+        if ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'unsafe_destination_type'
+        }
+        Write-Utf8NoBom -Path $Path -Content $Content
+        return
+    }
+    $normalized = $Content -replace "`r`n", "`n"
+    $bytes = ([System.Text.UTF8Encoding]::new($false)).GetBytes($normalized)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) }
+    finally { $stream.Dispose() }
+    Write-AgentShieldCreatedReceipt -Destination $Path -InstalledBytes $bytes -ReceiptDir $ReceiptDir | Out-Null
 }
 
 function Read-TextFile {
@@ -516,8 +544,23 @@ function Invoke-MdBlock {
         Warn "  unclosed opening marker in $(Split-Path -Leaf $Dst) -- appending new block"
     }
 
-    $content = $existing.TrimEnd("`r", "`n") + "`n`n" + $block
+    $content = $existing + $(if ($existing.EndsWith("`n")) { "`n" } else { "`n`n" }) + $block
+    $priorBytes = $null
+    if ($ReceiptDir -and -not $Dry -and $first -lt 0) {
+        $priorBytes = [IO.File]::ReadAllBytes($Dst)
+        $candidate = ([Text.UTF8Encoding]::new($false)).GetBytes(($content -replace "`r`n", "`n"))
+        if ($priorBytes.Length -ge $candidate.Length) { $priorBytes = $null }
+        if ($null -ne $priorBytes) {
+            for ($index = 0; $index -lt $priorBytes.Length; $index++) {
+                if ($priorBytes[$index] -ne $candidate[$index]) { $priorBytes = $null; break }
+            }
+        }
+    }
     Write-OrPreview -Path $Dst -Content $content -Dry $Dry -Verbo "would append block in"
+    if ($null -ne $priorBytes) {
+        Write-AgentShieldAppendedBlockReceipt -Destination $Dst -PriorBytes $priorBytes `
+            -InstalledBytes $candidate -ReceiptDir $ReceiptDir | Out-Null
+    }
     return "block appended"
 }
 

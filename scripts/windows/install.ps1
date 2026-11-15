@@ -15,6 +15,7 @@ param(
     [switch]   $ListTargets,
     [switch]   $SkipTools,
     [switch]   $SkipVSCode,
+    [string]   $ExperimentalReceiptDir,
     [ValidateSet("Console", "Json", "Quiet")]
     [string]   $OutputMode = "Console"
 )
@@ -131,6 +132,19 @@ if (-not (Test-Path (Join-Path $ScriptDir "targets"))) {
 
 $applyScript = Join-Path $ScriptDir "lib\ApplyTargets.ps1"
 $failedTargets = 0
+if ($ExperimentalReceiptDir -and -not $DryRun) {
+    try {
+        if (-not (Test-Path -LiteralPath (Join-Path $ScriptDir 'scripts\windows\rollback.ps1'))) {
+            throw 'rollback_entry_point_missing'
+        }
+        . (Join-Path $ScriptDir 'lib\RollbackReceipt.ps1')
+        Assert-AgentShieldEmptyReceiptDirectory -LiteralPath $ExperimentalReceiptDir
+    } catch {
+        Err "Experimental receipt directory unavailable: $($_.Exception.Message)"
+        exit 2
+    }
+    Warn 'Experimental receipts cover only new target files and some appended guidance blocks; this is not a complete rollback.'
+}
 
 # Validate selectors prior to making any changes
 & $applyScript -Root $ScriptDir -Scope machine -Only $Only -DryRun *>$null
@@ -168,6 +182,7 @@ if (-not $machineSelected) {
     }
     $machineArgs = @{ Root = $ScriptDir; Scope = "machine"; Only = $Only }
     if ($DryRun) { $machineArgs["DryRun"] = $true }
+    if ($ExperimentalReceiptDir -and -not $DryRun) { $machineArgs['ReceiptDir'] = $ExperimentalReceiptDir }
     Invoke-AgentShieldEngine -Arguments $machineArgs
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3) {
         Err "administrative layer failed (rc=$LASTEXITCODE)"
@@ -189,6 +204,7 @@ Write-Host "`n[AI Configuration - User Scope]" -ForegroundColor Cyan
 
 $applyArgs = @{ Root = $ScriptDir; Scope = "user"; TargetHome = $env:USERPROFILE; Only = $Only }
 if ($DryRun) { $applyArgs["DryRun"] = $true }
+if ($ExperimentalReceiptDir -and -not $DryRun) { $applyArgs['ReceiptDir'] = $ExperimentalReceiptDir }
 
 Invoke-AgentShieldEngine -Arguments $applyArgs
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3) {

@@ -48,8 +48,11 @@ agent-shield/
 │   ├── ApplyTargets.ps1
 │   ├── CodexSandbox.ps1
 │   ├── CodexSandboxProfile.ps1
+│   ├── RollbackReceipt.ps1
 │   ├── SecurityTools.ps1
 │   ├── apply_targets.py
+│   ├── git_config_receipt.py
+│   ├── rollback_receipt.py
 │   └── security-tools.sh
 ├── rules/        reviewed offline Semgrep baseline
 ├── scripts/      Windows, Unix, and scanner entry points

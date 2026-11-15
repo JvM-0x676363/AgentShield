@@ -12,6 +12,7 @@ param(
     # | vscode | managed | <target id>. Default: all.
     [string[]]$Only = @("all"),
     [switch]$ListTargets,
+    [string]$ExperimentalReceiptDir,
     [string]$LogPath = (Join-Path $env:SystemRoot "Temp\agent-shield-deploy.log"),
     [ValidateSet("Console", "Json", "Quiet")]
     [string]$OutputMode = "Console"
@@ -67,6 +68,19 @@ function Write-AgentShieldEvent {
 if ($ListTargets) {
     & (Join-Path $ScriptDir "lib\ApplyTargets.ps1") -Root $ScriptDir -ListTargets
     exit $LASTEXITCODE
+}
+
+if ($ExperimentalReceiptDir -and -not $DryRun) {
+    try {
+        if (-not (Test-Path -LiteralPath (Join-Path $ScriptDir 'scripts\windows\rollback.ps1'))) {
+            throw 'rollback_entry_point_missing'
+        }
+        . (Join-Path $ScriptDir 'lib\RollbackReceipt.ps1')
+        Assert-AgentShieldEmptyReceiptDirectory -LiteralPath $ExperimentalReceiptDir
+    } catch {
+        Microsoft.PowerShell.Utility\Write-Host "[ERROR] Experimental receipt directory unavailable: $($_.Exception.Message)" -ForegroundColor Red
+        exit 2
+    }
 }
 
 function Info($msg)    { Write-Host "[INFO] $msg" -ForegroundColor Green }
@@ -319,6 +333,7 @@ if ($LASTEXITCODE -eq 2) {
 
 $machineArgs = @{ Root = $ScriptDir; Scope = "machine"; Only = $Only }
 if ($DryRun) { $machineArgs["DryRun"] = $true }
+if ($ExperimentalReceiptDir -and -not $DryRun) { $machineArgs['ReceiptDir'] = $ExperimentalReceiptDir }
 
 # $machineOk has THREE states, not two: 1 applied, 0 failed, -1 not requested.
 # Without the third, '-Only codex-user' would exit with 1 for not applying
@@ -432,6 +447,7 @@ foreach ($user in $targetUsers) {
         $userApplyArgs = @{ Root = $ScriptDir; Scope = "user"
                             TargetHome = $user.Profile; Only = $Only }
         if ($DryRun) { $userApplyArgs["DryRun"] = $true }
+        if ($ExperimentalReceiptDir -and -not $DryRun) { $userApplyArgs['ReceiptDir'] = $ExperimentalReceiptDir }
 
         Invoke-AgentShieldEngine -Arguments $userApplyArgs
         # rc 3 = valid selection with no target in this scope. With -Only managed

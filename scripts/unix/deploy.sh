@@ -19,6 +19,7 @@ ONLY="all"   # default; overwritten by --only in parse below
 OUTPUT_MODE="Console"
 SKIP_TOOLS=false
 SKIP_VSCODE=false
+EXPERIMENTAL_RECEIPT_DIR=""
 
 # while + shift, NOT 'for arg in "$@"'. In a for loop, 'shift' modifies
 # positional parameters but does NOT advance the loop variable: '--only codex'
@@ -34,6 +35,8 @@ while [[ $# -gt 0 ]]; do
         --force)   FORCE=true ;;
         --skip-tools) SKIP_TOOLS=true ;;
         --skip-vscode) SKIP_VSCODE=true ;;
+        --experimental-receipt-dir) shift; EXPERIMENTAL_RECEIPT_DIR="${1:-}"
+                                    [[ -n "$EXPERIMENTAL_RECEIPT_DIR" ]] || { echo "[ERROR] --experimental-receipt-dir requires a value" >&2; exit 2; } ;;
         --output-mode) shift; OUTPUT_MODE="${1:-}"
                        [[ "$OUTPUT_MODE" =~ ^(Console|Json|Quiet)$ ]] || { echo "[ERROR] --output-mode must be Console, Json, or Quiet" >&2; exit 2; } ;;
         --only)    shift
@@ -42,7 +45,7 @@ while [[ $# -gt 0 ]]; do
         --only=*)  ONLY="${1#*=}" ;;
         --list-targets) exec "${PY:-python3}" "$SCRIPT_DIR/lib/apply_targets.py" \
                             --root "$SCRIPT_DIR" --list-targets ;;
-        -h|--help) echo "Usage: sudo bash deploy.sh [--dry-run] [--force] [--skip-tools] [--skip-vscode] [--output-mode Console|Json|Quiet] [--only <selectors>] [--list-targets]"; exit 0 ;;
+        -h|--help) echo "Usage: sudo bash deploy.sh [--dry-run] [--force] [--skip-tools] [--skip-vscode] [--output-mode Console|Json|Quiet] [--only <selectors>] [--list-targets] [--experimental-receipt-dir <absolute-dir>]"; exit 0 ;;
         *)         echo "[ERROR] unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -135,6 +138,18 @@ for _c in python3 python; do
 done
 MERGES_SKIPPED=0
 MACHINE_OK=0
+if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
+    if [[ ! -f "$SCRIPT_DIR/scripts/rollback/rollback.py" ]]; then
+        error "--experimental-receipt-dir requires the source checkout with the rollback entry point"
+        exit 2
+    fi
+    if [[ -z "$PY" ]] || ! "$PY" -c 'import sys; sys.path.insert(0,sys.argv[1]); from rollback_receipt import assert_empty_private_directory; assert_empty_private_directory(sys.argv[2])' \
+        "$SCRIPT_DIR/lib" "$EXPERIMENTAL_RECEIPT_DIR" >/dev/null 2>&1; then
+        error "--experimental-receipt-dir requires an empty private absolute directory owned by this process"
+        exit 2
+    fi
+    warn "Experimental receipts cover only new target files and some appended guidance blocks; this is not a complete rollback."
+fi
 
 # JSON merge wrapper. Without valid python3: consume heredoc and PRESERVE existing
 # file. Overwriting developer config would be worse than not applying right now.
@@ -178,7 +193,7 @@ info "System: $OS"
 # --- Source file validation ---
 # Per-tool configuration lives in targets/*.json + policy/*. Only check roots:
 # the engine validates each manifest and each referenced payload_file/compose.
-for f in "lib/apply_targets.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit" "scripts/scan/agent_shield_scan.py" "rules/semgrep/agentshield-baseline.yml"; do
+for f in "lib/apply_targets.py" "lib/rollback_receipt.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit" "scripts/scan/agent_shield_scan.py" "rules/semgrep/agentshield-baseline.yml"; do
     [[ -f "$SCRIPT_DIR/$f" ]] || { error "File not found: $SCRIPT_DIR/$f"; exit 1; }
 done
 [[ -d "$SCRIPT_DIR/targets" ]] || { error "Directory not found: $SCRIPT_DIR/targets"; exit 1; }
@@ -370,6 +385,7 @@ install_for_user() {
     else
         local apply_args=(--root "$SCRIPT_DIR" --scope user --home "$home" --only "$ONLY")
         $DRY_RUN && apply_args+=(--dry-run)
+        [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]] && apply_args+=(--receipt-dir "$EXPERIMENTAL_RECEIPT_DIR")
         local apply_rc=0
         "$PY" "$SCRIPT_DIR/lib/apply_targets.py" "${apply_args[@]}" || apply_rc=$?
         # rc 3 = valid selection with no targets in this scope. With --only managed
@@ -515,6 +531,7 @@ if [[ -z "$PY" ]]; then
 else
     MACHINE_ARGS=(--root "$SCRIPT_DIR" --scope machine --only "$ONLY")
     $DRY_RUN && MACHINE_ARGS+=(--dry-run)
+    [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]] && MACHINE_ARGS+=(--receipt-dir "$EXPERIMENTAL_RECEIPT_DIR")
     # rc 3 = step not requested. Detect by exit code, not by output parsing --
     # same contract the PowerShell engine uses, where Write-Host cannot be
     # captured by 2>&1.
