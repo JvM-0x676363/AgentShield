@@ -425,6 +425,7 @@ install_for_user() {
     local scanner_runner="$hooks_dir/agent-shield-scan.py"
     local scanner_rules="$hooks_dir/agent-shield-rules"
     local -a created_hook_files=()
+    local -a created_hook_guards=()
     local -a existing_hook_files=()
     if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
         local managed_file
@@ -437,7 +438,14 @@ install_for_user() {
             if [[ -e "$managed_file" ]]; then
                 [[ "$managed_file" == "$pre_commit" ]] || existing_hook_files+=("$managed_file")
             else
+                local guard_id
+                guard_id=$("$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                    --provisional "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR") || {
+                    warn "    Could not create a provisional hook or scanner receipt"
+                    return 1
+                }
                 created_hook_files+=("$managed_file")
+                created_hook_guards+=("$guard_id")
             fi
         done
         for managed_file in "${existing_hook_files[@]}"; do
@@ -515,10 +523,17 @@ install_for_user() {
         if [[ -f "$home/.gitconfig" ]]; then chown "$username" "$home/.gitconfig"; fi
         chown -R "$username" "$template_dir"
         if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
-            for managed_file in "${created_hook_files[@]}"; do
+            local index
+            for index in "${!created_hook_files[@]}"; do
+                managed_file="${created_hook_files[$index]}"
                 if ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
                     --created-file "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
                     warn "    Could not record a created hook or scanner file for rollback"
+                    git_receipt_failed=1
+                elif ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                    --clear-provisional "${created_hook_guards[$index]}" \
+                    --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+                    warn "    Could not clear a provisional hook or scanner receipt"
                     git_receipt_failed=1
                 fi
             done

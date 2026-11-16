@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
 import uuid
@@ -66,6 +67,55 @@ def record_manual_review(destination, receipt_dir, reason="existing_target_has_n
         if os.path.exists(staged):
             os.unlink(staged)
     return identifier
+
+
+def clear_provisional(receipt_dir, identifier):
+    """Clear only a private provisional marker after its inverse is saved."""
+    assert_private_directory(receipt_dir)
+    if not re.fullmatch(r"[0-9a-f]{32}", identifier):
+        raise ValueError("invalid_provisional_id")
+    path = os.path.join(receipt_dir, identifier + ".json")
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_mode & 0o077:
+        raise ValueError("unsafe_provisional_receipt")
+    if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+        raise ValueError("provisional_receipt_wrong_owner")
+    if info.st_size > 1024 * 1024:
+        raise ValueError("provisional_receipt_too_large")
+    with open(path, "r", encoding="utf-8") as source:
+        receipt = json.load(source)
+    operations = receipt.get("operations") if isinstance(receipt, dict) else None
+    if (not isinstance(receipt, dict) or receipt.get("schema_version") != 1 or
+            receipt.get("runner") != "agentshield-rollback" or
+            not isinstance(operations, list) or len(operations) != 1 or
+            not isinstance(operations[0], dict) or operations[0].get("kind") != "manual_review" or
+            operations[0].get("reason") != "receipt_incomplete"):
+        raise ValueError("not_a_provisional_receipt")
+    destination = operations[0].get("destination")
+    if not isinstance(destination, str) or not os.path.isabs(destination):
+        raise ValueError("invalid_provisional_destination")
+    inverse_found = False
+    with os.scandir(receipt_dir) as entries:
+        for entry in entries:
+            if not re.fullmatch(r"[0-9a-f]{32}\.json", entry.name) or entry.path == path:
+                continue
+            candidate_info = os.lstat(entry.path)
+            if (not stat.S_ISREG(candidate_info.st_mode) or candidate_info.st_nlink != 1 or
+                    candidate_info.st_mode & 0o077 or candidate_info.st_size > 1024 * 1024):
+                continue
+            with open(entry.path, "r", encoding="utf-8") as source:
+                candidate = json.load(source)
+            candidate_ops = candidate.get("operations") if isinstance(candidate, dict) else None
+            if (isinstance(candidate, dict) and candidate.get("schema_version") == 1 and
+                    candidate.get("runner") == "agentshield-rollback" and
+                    isinstance(candidate_ops, list) and len(candidate_ops) == 1 and
+                    isinstance(candidate_ops[0], dict) and candidate_ops[0].get("kind") == "created_file" and
+                    candidate_ops[0].get("destination") == destination):
+                inverse_found = True
+                break
+    if not inverse_found:
+        raise ValueError("inverse_receipt_missing")
+    os.unlink(path)
 
 
 def record_created_file(destination, installed_content, receipt_dir):
@@ -280,9 +330,19 @@ def main():
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--created-file")
     source.add_argument("--manual-review")
+    source.add_argument("--provisional")
+    source.add_argument("--clear-provisional")
     parser.add_argument("--receipt-dir", required=True)
     args = parser.parse_args()
     try:
+        if args.clear_provisional is not None:
+            clear_provisional(args.receipt_dir, args.clear_provisional)
+            return 0
+        if args.provisional is not None:
+            if not os.path.isabs(args.provisional) or os.path.lexists(args.provisional):
+                raise ValueError("provisional_destination_invalid")
+            print(record_manual_review(args.provisional, args.receipt_dir, "receipt_incomplete"))
+            return 0
         destination = args.created_file or args.manual_review
         if not os.path.isabs(destination):
             raise ValueError("destination_not_absolute")

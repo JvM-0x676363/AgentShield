@@ -186,6 +186,41 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.assertEqual(json.loads(blocked.stdout)["status"], "blocked")
         self.assertTrue(created.exists())
 
+    def test_provisional_cli_clears_only_after_created_receipt(self):
+        created = pathlib.Path(self.temp.name) / "new-hook"
+        provisional = subprocess.run([
+            sys.executable, str(ROOT / "lib" / "rollback_receipt.py"),
+            "--provisional", str(created), "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(provisional.returncode, 0, provisional.stdout + provisional.stderr)
+        identifier = provisional.stdout.strip()
+        self.assertRegex(identifier, r"^[0-9a-f]{32}$")
+        early = subprocess.run([
+            sys.executable, str(ROOT / "lib" / "rollback_receipt.py"),
+            "--clear-provisional", identifier, "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(early.returncode, 1)
+        self.assertTrue((self.receipts / (identifier + ".json")).exists())
+        created.write_bytes(b"managed hook\n")
+        record_created_file(str(created), b"managed hook\n", str(self.receipts))
+        before = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(json.loads(before.stdout)["status"], "blocked")
+        self.assertTrue(created.exists())
+        cleared = subprocess.run([
+            sys.executable, str(ROOT / "lib" / "rollback_receipt.py"),
+            "--clear-provisional", identifier, "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(cleared.returncode, 0, cleared.stdout + cleared.stderr)
+        self.assertEqual(len(list(self.receipts.glob("*.json"))), 1)
+        ready = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(json.loads(ready.stdout)["status"], "ready")
+
     def test_unix_engine_marks_existing_overwrite_for_manual_review(self):
         base = pathlib.Path(self.temp.name)
         fixture = base / "fixture"

@@ -521,6 +521,7 @@ foreach ($user in $targetUsers) {
         $userScanRunner = Join-Path $userHooksDir "agent-shield-scan.py"
         $userScanRules = Join-Path $userHooksDir "agent-shield-rules"
         $createdHookFiles = @()
+        $createdHookGuards = @{}
         $existingHookFiles = @()
         if ($ExperimentalReceiptDir -and -not $DryRun) {
             foreach ($managedFile in @($userPreCommit, $userScanRunner,
@@ -532,7 +533,11 @@ foreach ($user in $targetUsers) {
                         ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
                     throw 'experimental_receipt_destination_reparse_point'
                 }
-                if (-not $existingFile) { $createdHookFiles += $managedFile }
+                if (-not $existingFile) {
+                    $createdHookGuards[$managedFile] = Write-AgentShieldManualReviewReceipt `
+                        -Destination $managedFile -ReceiptDir $ExperimentalReceiptDir -Reason 'receipt_incomplete'
+                    $createdHookFiles += $managedFile
+                }
                 elseif ($managedFile -ne $userPreCommit) { $existingHookFiles += $managedFile }
             }
             foreach ($managedFile in $existingHookFiles) {
@@ -625,6 +630,9 @@ foreach ($user in $targetUsers) {
                     Write-AgentShieldCreatedReceipt -Destination $managedFile `
                         -InstalledBytes ([IO.File]::ReadAllBytes($managedFile)) `
                         -ReceiptDir $ExperimentalReceiptDir | Out-Null
+                    $guard = $createdHookGuards[$managedFile]
+                    Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+                    Remove-Item -LiteralPath $guard -Force
                 }
             }
             if ($gitReceiptError) { throw "Git configuration receipt failed: $gitReceiptError" }

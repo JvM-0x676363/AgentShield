@@ -70,6 +70,10 @@ between those steps, the marker blocks batch apply for operator review.
 In experimental mode, installers also mark pre-existing hook, scanner runner,
 Semgrep rule and Git template files before replacing them. Their prior bytes
 are not stored in receipts, so they remain manual-review items.
+New hook and scanner destinations receive a provisional marker before copying;
+the marker is cleared only after their created-file receipt is recorded. An
+interrupted copy therefore blocks batch apply instead of disappearing from its
+coverage report.
 
 The source-checkout rollback scripts can preview one experimental run without
 changing files. Windows: `powershell -NoProfile -File scripts/windows/rollback.ps1

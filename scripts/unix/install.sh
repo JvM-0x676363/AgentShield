@@ -462,6 +462,7 @@ PRE_COMMIT="$GIT_HOOKS_DIR/pre-commit"
 SCANNER_RUNNER="$GIT_HOOKS_DIR/agent-shield-scan.py"
 SCANNER_RULES="$GIT_HOOKS_DIR/agent-shield-rules"
 CREATED_HOOK_FILES=()
+CREATED_HOOK_GUARDS=()
 EXISTING_HOOK_FILES=()
 if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
     for managed_file in "$PRE_COMMIT" "$SCANNER_RUNNER" \
@@ -473,7 +474,13 @@ if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
         if [[ -e "$managed_file" ]]; then
             [[ "$managed_file" == "$PRE_COMMIT" ]] || EXISTING_HOOK_FILES+=("$managed_file")
         else
+            guard_id=$("$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                --provisional "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR") || {
+                error "Could not create a provisional hook or scanner receipt"
+                exit 2
+            }
             CREATED_HOOK_FILES+=("$managed_file")
+            CREATED_HOOK_GUARDS+=("$guard_id")
         fi
     done
     for managed_file in "${EXISTING_HOOK_FILES[@]}"; do
@@ -556,10 +563,16 @@ if [[ $EUID -eq 0 && "$TARGET_USER" != "root" && ! $DRY_RUN ]]; then
 fi
 
 if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
-    for managed_file in "${CREATED_HOOK_FILES[@]}"; do
+    for index in "${!CREATED_HOOK_FILES[@]}"; do
+        managed_file="${CREATED_HOOK_FILES[$index]}"
         if ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
             --created-file "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
             error "Could not record a created hook or scanner file for rollback"
+            FAILED_TARGETS=1
+        elif ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+            --clear-provisional "${CREATED_HOOK_GUARDS[$index]}" \
+            --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+            error "Could not clear a provisional hook or scanner receipt"
             FAILED_TARGETS=1
         fi
     done

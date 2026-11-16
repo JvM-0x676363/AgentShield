@@ -284,6 +284,7 @@ $ScannerRules = Join-Path $ScriptDir "rules\semgrep"
 $InstalledScannerRunner = Join-Path $HooksDir "agent-shield-scan.py"
 $InstalledScannerRules = Join-Path $HooksDir "agent-shield-rules"
 $createdHookFiles = @()
+$createdHookGuards = @{}
 $existingHookFiles = @()
 if ($ExperimentalReceiptDir -and -not $DryRun) {
     foreach ($managedFile in @($PreCommit, $InstalledScannerRunner,
@@ -295,7 +296,11 @@ if ($ExperimentalReceiptDir -and -not $DryRun) {
                 ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
             throw 'experimental_receipt_destination_reparse_point'
         }
-        if (-not $existingFile) { $createdHookFiles += $managedFile }
+        if (-not $existingFile) {
+            $createdHookGuards[$managedFile] = Write-AgentShieldManualReviewReceipt `
+                -Destination $managedFile -ReceiptDir $ExperimentalReceiptDir -Reason 'receipt_incomplete'
+            $createdHookFiles += $managedFile
+        }
         elseif ($managedFile -ne $PreCommit) { $existingHookFiles += $managedFile }
     }
     foreach ($managedFile in $existingHookFiles) {
@@ -374,6 +379,9 @@ if ($ExperimentalReceiptDir -and -not $DryRun) {
             Write-AgentShieldCreatedReceipt -Destination $managedFile `
                 -InstalledBytes ([IO.File]::ReadAllBytes($managedFile)) `
                 -ReceiptDir $ExperimentalReceiptDir | Out-Null
+            $guard = $createdHookGuards[$managedFile]
+            Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+            Remove-Item -LiteralPath $guard -Force
         } catch {
             Err "Could not record a created hook or scanner file for rollback: $($_.Exception.Message)"
             $failedTargets = 1
