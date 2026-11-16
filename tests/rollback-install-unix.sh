@@ -103,5 +103,57 @@ for key in core.hooksPath init.templateDir; do
     fi
 done
 
+existing_file="$test_home/.claude/vendor-claude-code.md"
+printf 'pre-existing user file\n' > "$existing_file"
+manual_receipt_dir="$test_root/manual-receipts"
+mkdir -m 0700 "$manual_receipt_dir"
+if ! manual_install_output="$(bash "$repo/scripts/unix/install.sh" \
+    --only claude-code --skip-tools --skip-vscode \
+    --experimental-receipt-dir "$manual_receipt_dir" 2>&1)"; then
+    printf '%s\n' "$manual_install_output" | tail -n 12 >&2
+    printf 'Evidence directory: %s\n' "$test_root" >&2
+    exit 1
+fi
+if [[ "$manual_install_output" != *'INSTALL DONE failed=0'* ]]; then
+    echo 'Existing-file install did not report success.' >&2
+    exit 1
+fi
+cp "$existing_file" "$test_root/installed-existing.txt"
+
+if manual_preview="$(python3 "$repo/scripts/rollback/rollback.py" --receipt-dir "$manual_receipt_dir")"; then
+    echo 'Existing-file rollback preview should require manual review.' >&2
+    exit 1
+else
+    preview_rc=$?
+    [[ "$preview_rc" -eq 2 ]] || { printf '%s\n' "$manual_preview" >&2; exit 1; }
+fi
+printf '%s\n' "$manual_preview" | python3 -c '
+import json, sys
+result = json.load(sys.stdin)
+if result.get("status") != "blocked" or not any(
+        item.get("status") == "preview_only" for item in result.get("items", [])):
+    sys.exit(1)
+' || { echo 'Existing-file review was not reported.' >&2; exit 1; }
+
+if manual_result="$(python3 "$repo/scripts/rollback/rollback.py" --receipt-dir "$manual_receipt_dir" --apply)"; then
+    echo 'Existing-file batch rollback should have been blocked.' >&2
+    exit 1
+else
+    apply_rc=$?
+    [[ "$apply_rc" -eq 2 ]] || { printf '%s\n' "$manual_result" >&2; exit 1; }
+fi
+printf '%s\n' "$manual_result" | python3 -c '
+import json, sys
+result = json.load(sys.stdin)
+if result.get("status") != "blocked" or result.get("applied") != 0:
+    sys.exit(1)
+' || { echo 'Existing-file batch rollback changed state.' >&2; exit 1; }
+if ! cmp -s "$existing_file" "$test_root/installed-existing.txt" ||
+   [[ ! -f "$test_home/.git-hooks/pre-commit" ]]; then
+    echo 'Existing-file batch rollback changed the temporary profile.' >&2
+    exit 1
+fi
+
 printf 'RESULT: Unix isolated install and rollback passed (receipts=%s)\n' "$receipt_count"
+echo 'RESULT: Unix existing-file review blocked batch rollback'
 printf 'Evidence directory: %s\n' "$test_root"

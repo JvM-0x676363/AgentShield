@@ -92,7 +92,36 @@ try {
             throw 'git_config_survived_rollback'
         }
     }
+    $existingFile = Join-Path $testHome '.claude\vendor-claude-code.md'
+    [IO.File]::WriteAllText($existingFile, 'pre-existing user file')
+    $manualReceiptDir = Join-Path $testRoot 'manual-receipts'
+    New-PrivateReceiptDirectory -Path $manualReceiptDir
+    $ErrorActionPreference = 'Continue'
+    try {
+        $manualInstallOutput = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $install `
+            -Only claude-code -SkipTools -SkipVSCode -ExperimentalReceiptDir $manualReceiptDir 2>&1)
+        $manualInstallExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = 'Stop'
+    }
+    if ($manualInstallExit -ne 0 -or
+        -not @($manualInstallOutput | Select-String 'INSTALL DONE failed=0').Count) {
+        throw 'existing_file_install_failed'
+    }
+    $installedContent = [IO.File]::ReadAllText($existingFile)
+    $manualPreview = & powershell -NoProfile -File $rollback -ReceiptDir $manualReceiptDir | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 2 -or $manualPreview.status -ne 'blocked' -or
+        @($manualPreview.items | Where-Object { $_.status -eq 'preview_only' }).Count -lt 1) {
+        throw 'existing_file_review_not_required'
+    }
+    $manualResult = & powershell -NoProfile -File $rollback -ReceiptDir $manualReceiptDir -Apply | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 2 -or $manualResult.status -ne 'blocked' -or
+        $manualResult.applied -ne 0 -or [IO.File]::ReadAllText($existingFile) -cne $installedContent -or
+        -not (Test-Path -LiteralPath (Join-Path $testHome '.git-hooks\pre-commit'))) {
+        throw 'existing_file_batch_was_applied'
+    }
     Write-Host "RESULT: Windows isolated install and rollback passed (receipts=$($preview.receipts))"
+    Write-Host 'RESULT: Windows existing-file review blocked batch rollback'
     Write-Host "Evidence directory: $testRoot"
 } finally {
     foreach ($name in $environmentNames) {
