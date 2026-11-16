@@ -258,7 +258,9 @@ if (-not $vsCodeBin) {
     if ($codeCmd) { $vsCodeBin = $codeCmd.Source }
 }
 
-if ($vsCodeBin) {
+if ($SkipVSCode) {
+    Info "  VS Code extensions skipped (-SkipVSCode)"
+} elseif ($vsCodeBin) {
     foreach ($ext in $vsExts) {
         if ($DryRun) { Info "  [dry-run] code --install-extension $ext --force" }
         else {
