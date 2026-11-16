@@ -56,6 +56,10 @@ reject a destination redirected through a changed symbolic link. Older pilot
 receipts without this field are accepted only when the parent path has no
 symbolic link.
 
+Unix JSON key receipts remain preview-only. Their inverse needs a way to
+preserve file metadata and avoid overwriting a concurrent user edit. A run
+containing one blocks directory-wide apply before any other receipt is applied.
+
 The source-checkout rollback scripts can preview one experimental run without
 changing files. Windows: `powershell -NoProfile -File scripts/windows/rollback.ps1
 -ReceiptDir <private-dir>`. Linux/macOS: `bash scripts/unix/rollback.sh

@@ -118,9 +118,33 @@ class CreatedFileReceiptTests(unittest.TestCase):
         receipt_path = next(self.receipts.glob("*.json"))
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         self.assertEqual(plan(receipt)[0][0], "json_added_keys")
+        refused = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt", str(receipt_path), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(refused.returncode, 2)
+        self.assertEqual(json.loads(refused.stdout)["reason"], "json_inverse_not_yet_available")
+        self.assertEqual(self.destination.read_bytes(), content)
         self.destination.write_bytes(b'{"user":"kept"}\n')
         with self.assertRaisesRegex(ValueError, "destination_"):
             plan(receipt)
+
+    def test_run_apply_blocks_all_when_json_inverse_is_preview_only(self):
+        self.receipt()
+        original = b'{"user":"kept","managed":null}\n'
+        settings = pathlib.Path(self.temp.name) / "settings.json"
+        settings.write_bytes(original)
+        record_json_added_keys(str(settings), original, str(self.receipts), {"managed": None})
+        result = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2)
+        report = json.loads(result.stdout)
+        self.assertEqual((report["status"], report["applied"], report["ready"], report["blocked"]),
+                         ("blocked", 0, 1, 1))
+        self.assertTrue(self.destination.exists())
+        self.assertEqual(settings.read_bytes(), original)
 
     def test_appended_block_restores_prior_bytes(self):
         prior = b"user guidance\n"
