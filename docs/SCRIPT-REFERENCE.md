@@ -96,6 +96,12 @@ applies only a fully ready receipt set, then checks that created files and Git
 settings were removed. Run it without Administrator privileges. It retains its
 temporary directory for inspection.
 
+For a non-root Linux, WSL, or macOS source-checkout pilot, run
+`bash tests/rollback-install-unix.sh`. It uses a private temporary profile and
+receipt directory, requires a fully ready preview before applying rollback,
+and checks that created files and Git settings were removed. It retains the
+temporary directory for inspection.
+
 `-Only` filters AI configuration only. Git hooks, scanner tools, and VS Code
 extensions remain separate layers controlled by their dedicated flags.
 
