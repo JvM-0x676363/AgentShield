@@ -1,5 +1,6 @@
 """Record newly created AgentShield files without copying user data."""
 
+import argparse
 import hashlib
 import json
 import os
@@ -241,3 +242,33 @@ def record_git_config_pair(config_path, values, receipt_dir):
         if os.path.exists(staged):
             os.unlink(staged)
     return identifier
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--created-file", required=True)
+    parser.add_argument("--receipt-dir", required=True)
+    args = parser.parse_args()
+    try:
+        if not os.path.isabs(args.created_file):
+            raise ValueError("destination_not_absolute")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(args.created_file, flags)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 1024 * 1024:
+                raise ValueError("unsafe_destination_type_or_size")
+            with os.fdopen(os.dup(fd), "rb") as source:
+                content = source.read(1024 * 1024 + 1)
+            if len(content) != info.st_size or os.fstat(fd).st_mtime_ns != info.st_mtime_ns:
+                raise ValueError("destination_changed")
+        finally:
+            os.close(fd)
+        record_created_file(args.created_file, content, args.receipt_dir)
+    except (OSError, ValueError):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

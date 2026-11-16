@@ -190,6 +190,23 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.assertEqual(json.loads(removed.stdout)["status"], "removed")
         self.assertFalse(managed.exists())
 
+    def test_created_hook_receipt_cli(self):
+        hook = pathlib.Path(self.temp.name) / "pre-commit"
+        hook.write_bytes(b"#!/bin/sh\nexit 0\n")
+        recorded = subprocess.run([
+            sys.executable, str(ROOT / "lib" / "rollback_receipt.py"),
+            "--created-file", str(hook), "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+        receipt = next(self.receipts.glob("*.json"))
+        self.assertEqual(plan(json.loads(receipt.read_text()))[0][0], "created_file")
+        removed = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt", str(receipt), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+        self.assertFalse(hook.exists())
+
     def test_unix_engine_appended_guidance_rollback(self):
         base = pathlib.Path(self.temp.name)
         fixture = base / "fixture"

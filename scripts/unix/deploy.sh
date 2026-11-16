@@ -424,6 +424,18 @@ install_for_user() {
     local pre_commit="$hooks_dir/pre-commit"
     local scanner_runner="$hooks_dir/agent-shield-scan.py"
     local scanner_rules="$hooks_dir/agent-shield-rules"
+    local -a created_hook_files=()
+    if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
+        local managed_file
+        for managed_file in "$pre_commit" "$scanner_runner" \
+            "$scanner_rules/agentshield-baseline.yml" "$template_dir/hooks/pre-commit"; do
+            if [[ -L "$managed_file" ]]; then
+                warn "    Experimental receipt mode refuses a symbolic-link destination"
+                return 1
+            fi
+            [[ -e "$managed_file" ]] || created_hook_files+=("$managed_file")
+        done
+    fi
     # Single source in hooks/pre-commit -- previously duplicated (and divergent) across 4 installers.
     # Byte-by-byte comparison against what WOULD BE written, so an existing hook in CRLF
     # is rewritten in LF rather than reported as up to date.
@@ -483,6 +495,15 @@ install_for_user() {
         fi
         if [[ -f "$home/.gitconfig" ]]; then chown "$username" "$home/.gitconfig"; fi
         chown -R "$username" "$template_dir"
+        if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
+            for managed_file in "${created_hook_files[@]}"; do
+                if ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                    --created-file "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+                    warn "    Could not record a created hook or scanner file for rollback"
+                    git_receipt_failed=1
+                fi
+            done
+        fi
         if [[ "$git_receipt_failed" -ne 0 ]]; then return 1; fi
     else
         echo "  [dry-run] git config --global core.hooksPath $hooks_dir (as $username)"

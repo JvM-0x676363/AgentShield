@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
 | Skip scanners | `-SkipTools` | `--skip-tools` | Defers gitleaks, Semgrep, and Trivy installation. |
 | Skip VS Code | `-SkipVSCode` | `--skip-vscode` | Defers VS Code extension installation. |
 | Machine output | `-OutputMode Console|Json|Quiet` | `--output-mode Console|Json|Quiet` | `Console` is interactive; `Json` emits events; `Quiet` emits only the final JSON result. |
-| Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, some appended guidance blocks, and the two Git configuration keys together. Unix JSON key records are preview-only. This does not cover the full installation. Omit for normal deployment. |
+| Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, newly created hook and scanner files, some appended guidance blocks, and the two Git configuration keys together. Unix JSON key records are preview-only. Pre-existing hooks and scanner files are not reversible. This does not cover the full installation. Omit for normal deployment. |
 | List targets | `-ListTargets` | `--list-targets` | Lists manifest targets and exits without changes. |
 
 Unix rollback receipts record the resolved parent directory. Preview and apply

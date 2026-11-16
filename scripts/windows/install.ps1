@@ -283,6 +283,18 @@ $ScannerRunner = Join-Path $ScriptDir "scripts\scan\agent_shield_scan.py"
 $ScannerRules = Join-Path $ScriptDir "rules\semgrep"
 $InstalledScannerRunner = Join-Path $HooksDir "agent-shield-scan.py"
 $InstalledScannerRules = Join-Path $HooksDir "agent-shield-rules"
+$createdHookFiles = @()
+if ($ExperimentalReceiptDir -and -not $DryRun) {
+    foreach ($managedFile in @($PreCommit, $InstalledScannerRunner,
+            (Join-Path $InstalledScannerRules 'agentshield-baseline.yml'),
+            (Join-Path $TemplateDir 'hooks\pre-commit'))) {
+        $existingFile = Get-Item -LiteralPath $managedFile -Force -ErrorAction SilentlyContinue
+        if ($existingFile -and ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'experimental_receipt_destination_reparse_point'
+        }
+        if (-not $existingFile) { $createdHookFiles += $managedFile }
+    }
+}
 
 Info "Configuring core.hooksPath -> $HooksDir"
 if (-not $DryRun) {
@@ -343,6 +355,18 @@ if (-not $DryRun) {
 } else {
     Info "  [dry-run] mkdir $TemplateHooksDir"
     Info "  [dry-run] git config --global init.templateDir $TemplateDir"
+}
+if ($ExperimentalReceiptDir -and -not $DryRun) {
+    foreach ($managedFile in $createdHookFiles) {
+        try {
+            Write-AgentShieldCreatedReceipt -Destination $managedFile `
+                -InstalledBytes ([IO.File]::ReadAllBytes($managedFile)) `
+                -ReceiptDir $ExperimentalReceiptDir | Out-Null
+        } catch {
+            Err "Could not record a created hook or scanner file for rollback: $($_.Exception.Message)"
+            $failedTargets = 1
+        }
+    }
 }
 
 Sep

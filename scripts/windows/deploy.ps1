@@ -520,6 +520,18 @@ foreach ($user in $targetUsers) {
         $userPreCommit = Join-Path $userHooksDir "pre-commit"
         $userScanRunner = Join-Path $userHooksDir "agent-shield-scan.py"
         $userScanRules = Join-Path $userHooksDir "agent-shield-rules"
+        $createdHookFiles = @()
+        if ($ExperimentalReceiptDir -and -not $DryRun) {
+            foreach ($managedFile in @($userPreCommit, $userScanRunner,
+                    (Join-Path $userScanRules 'agentshield-baseline.yml'),
+                    (Join-Path $userTemplateDir 'hooks\pre-commit'))) {
+                $existingFile = Get-Item -LiteralPath $managedFile -Force -ErrorAction SilentlyContinue
+                if ($existingFile -and ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw 'experimental_receipt_destination_reparse_point'
+                }
+                if (-not $existingFile) { $createdHookFiles += $managedFile }
+            }
+        }
 
         if (-not $DryRun) {
             Copy-Item -LiteralPath $SrcScanRunner -Destination $userScanRunner -Force
@@ -596,6 +608,13 @@ foreach ($user in $targetUsers) {
             # -- the directory tree belongs to it.
             Grant-UserOwnership -Path (Join-Path $user.Profile ".gemini") -Username $user.Username
             Grant-UserOwnership -Path (Join-Path $user.Profile "AppData\Roaming\Code\User") -Username $user.Username
+            if ($ExperimentalReceiptDir) {
+                foreach ($managedFile in $createdHookFiles) {
+                    Write-AgentShieldCreatedReceipt -Destination $managedFile `
+                        -InstalledBytes ([IO.File]::ReadAllBytes($managedFile)) `
+                        -ReceiptDir $ExperimentalReceiptDir | Out-Null
+                }
+            }
             if ($gitReceiptError) { throw "Git configuration receipt failed: $gitReceiptError" }
         } else {
             Info "    [dry-run] git config --file $userGitConfig core.hooksPath $userHooksDir"

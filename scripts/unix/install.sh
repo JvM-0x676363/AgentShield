@@ -461,6 +461,17 @@ fi
 PRE_COMMIT="$GIT_HOOKS_DIR/pre-commit"
 SCANNER_RUNNER="$GIT_HOOKS_DIR/agent-shield-scan.py"
 SCANNER_RULES="$GIT_HOOKS_DIR/agent-shield-rules"
+CREATED_HOOK_FILES=()
+if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
+    for managed_file in "$PRE_COMMIT" "$SCANNER_RUNNER" \
+        "$SCANNER_RULES/agentshield-baseline.yml" "$GIT_TEMPLATE/hooks/pre-commit"; do
+        if [[ -L "$managed_file" ]]; then
+            error "Experimental receipt mode refuses a symbolic-link destination"
+            exit 2
+        fi
+        [[ -e "$managed_file" ]] || CREATED_HOOK_FILES+=("$managed_file")
+    done
+fi
 
 # Single source in hooks/pre-commit -- previously duplicated (and divergent) across 4 installers.
 # Byte-by-byte comparison against what WOULD BE written (source with CRLF stripped),
@@ -522,6 +533,16 @@ if [[ $EUID -eq 0 && "$TARGET_USER" != "root" && ! $DRY_RUN ]]; then
                      "$TARGET_HOME/Library/Application Support/Code/User" \
                      "$TARGET_HOME/snap/code/current/.config/Code/User"; do
         [[ -e "$user_path" ]] && chown -R "$TARGET_USER" "$user_path"
+    done
+fi
+
+if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
+    for managed_file in "${CREATED_HOOK_FILES[@]}"; do
+        if ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+            --created-file "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+            error "Could not record a created hook or scanner file for rollback"
+            FAILED_TARGETS=1
+        fi
     done
 fi
 
