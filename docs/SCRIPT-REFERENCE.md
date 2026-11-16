@@ -56,6 +56,13 @@ reject a destination redirected through a changed symbolic link. Older pilot
 receipts without this field are accepted only when the parent path has no
 symbolic link.
 
+The source-checkout rollback scripts can preview one experimental run without
+changing files. Windows: `powershell -NoProfile -File scripts/windows/rollback.ps1
+-ReceiptDir <private-dir>`. Linux/macOS: `bash scripts/unix/rollback.sh
+--receipt-dir <private-dir>`. The JSON result lists each receipt's status and
+counts conflicts, without printing destination paths. Directory-wide `Apply`
+is intentionally unavailable; apply requires an individual receipt.
+
 `-Only` filters AI configuration only. Git hooks, scanner tools, and VS Code
 extensions remain separate layers controlled by their dedicated flags.
 

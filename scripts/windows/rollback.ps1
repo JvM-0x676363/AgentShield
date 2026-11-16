@@ -1,7 +1,60 @@
-param([Parameter(Mandatory)][string]$Receipt, [switch]$Apply)
+param([string]$Receipt, [string]$ReceiptDir, [switch]$Apply)
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'lib/RollbackReceipt.ps1')
+
+if ($ReceiptDir -or -not $Receipt) {
+    try {
+        if ($Receipt -or -not $ReceiptDir) { throw 'receipt_source_invalid' }
+        if ($Apply) { throw 'batch_apply_not_available' }
+        Assert-AgentShieldPrivateReceiptPath -LiteralPath $ReceiptDir -Directory
+        $entries = @(Get-ChildItem -LiteralPath $ReceiptDir -Force -ErrorAction Stop | Sort-Object Name)
+        if ($entries.Count -lt 1 -or $entries.Count -gt 128) { throw 'receipt_count_invalid' }
+        $items = @()
+        $shell = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        foreach ($entry in $entries) {
+            if ($entry.Name -cnotmatch '^[0-9a-f]{32}\.json$') {
+                $items += [ordered]@{ id = $null; status = 'blocked'; reason = 'invalid_receipt_entry' }
+                continue
+            }
+            $item = [ordered]@{ id = $entry.BaseName }
+            try {
+                Assert-AgentShieldPrivateReceiptPath -LiteralPath $entry.FullName
+                $metadata = [IO.File]::ReadAllText($entry.FullName) | ConvertFrom-Json
+                $item['kind'] = [string]@($metadata.operations)[0].kind
+                $output = @(& $shell -NoProfile -File $PSCommandPath -Receipt $entry.FullName 2>$null)
+                if ($output.Count -ne 1) { throw 'receipt_preview_failed' }
+                $result = $output[0] | ConvertFrom-Json
+                if ($result.status -eq 'ready' -and $LASTEXITCODE -eq 0) {
+                    $item['status'] = 'ready'
+                } else {
+                    $item['status'] = 'blocked'
+                    $item['reason'] = $(if ([string]$result.reason -match '^[a-z_]+$') { [string]$result.reason } else { 'receipt_preview_failed' })
+                }
+            } catch {
+                $item['status'] = 'blocked'
+                $item['reason'] = $(if ($_.Exception.Message -match '^[a-z_]+$') { $_.Exception.Message } else { 'metadata_unavailable' })
+            }
+            $items += $item
+        }
+        $ready = @($items | Where-Object { $_.status -eq 'ready' }).Count
+        $code = $(if ($ready -eq $items.Count) { 0 } else { 2 })
+        [ordered]@{
+            schema_version = 1; runner = 'rollback-preview'
+            status = $(if ($code -eq 0) { 'ready' } else { 'blocked' })
+            dry_run = $true; receipts = $items.Count; ready = $ready
+            blocked = $items.Count - $ready; items = $items; exit_code = $code
+        } | ConvertTo-Json -Compress -Depth 5
+        exit $code
+    } catch {
+        [ordered]@{
+            schema_version = 1; runner = 'rollback-preview'; status = 'blocked'
+            reason = $(if ($_.Exception.Message -match '^[a-z_]+$') { $_.Exception.Message } else { 'metadata_unavailable' })
+            exit_code = 2
+        } | ConvertTo-Json -Compress
+        exit 2
+    }
+}
 
 function Get-BytesSha256 {
     param([byte[]]$Bytes)

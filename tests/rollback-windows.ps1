@@ -204,6 +204,28 @@ try {
         (Get-AgentShieldGitConfigValue -ConfigPath $configPath -Key 'init.templateDir') -cne 'C:\pair-template') {
         throw 'git_pair_conflict_not_preserved'
     }
+    $previewDir = Join-Path $testRoot 'preview-receipts'
+    New-PrivateTestDirectory -Path $previewDir
+    $previewFile = Join-Path $testRoot 'preview-only.txt'
+    [IO.File]::WriteAllBytes($previewFile, $content)
+    Write-AgentShieldCreatedReceipt -Destination $previewFile -InstalledBytes $content `
+        -ReceiptDir $previewDir | Out-Null
+    $runPreview = & powershell -NoProfile -File $rollback -ReceiptDir $previewDir | ConvertFrom-Json
+    if ($runPreview.status -ne 'ready' -or $runPreview.receipts -ne 1 -or
+        $runPreview.ready -ne 1 -or -not (Test-Path -LiteralPath $previewFile)) {
+        throw 'batch_preview_failed'
+    }
+    $batchApply = & powershell -NoProfile -File $rollback -ReceiptDir $previewDir -Apply | ConvertFrom-Json
+    if ($batchApply.status -ne 'blocked' -or $batchApply.reason -ne 'batch_apply_not_available' -or
+        -not (Test-Path -LiteralPath $previewFile)) {
+        throw 'batch_apply_not_rejected'
+    }
+    [IO.File]::WriteAllText($previewFile, 'user edit')
+    $runConflict = & powershell -NoProfile -File $rollback -ReceiptDir $previewDir | ConvertFrom-Json
+    if ($runConflict.status -ne 'blocked' -or $runConflict.blocked -ne 1 -or
+        -not (Test-Path -LiteralPath $previewFile)) {
+        throw 'batch_conflict_not_reported'
+    }
     Write-Output 'RESULT: Windows rollback synthetic checks passed'
 } finally {
     $absolute = [IO.Path]::GetFullPath($testRoot)

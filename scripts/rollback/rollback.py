@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import stat
 import sys
 
@@ -138,14 +139,57 @@ def plan(receipt):
     return planned
 
 
+def preview_directory(directory):
+    info = os.lstat(directory)
+    if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o077:
+        raise ValueError("receipt_directory_not_private")
+    if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+        raise ValueError("receipt_directory_wrong_owner")
+    with os.scandir(directory) as entries:
+        files = sorted(entries, key=lambda entry: entry.name)
+    if not files or len(files) > 128:
+        raise ValueError("receipt_count_invalid")
+    results = []
+    for entry in files:
+        if not re.fullmatch(r"[0-9a-f]{32}\.json", entry.name):
+            results.append({"id": None, "status": "blocked", "reason": "invalid_receipt_entry"})
+            continue
+        item = {"id": entry.name[:-5]}
+        try:
+            check_receipt_location(entry.path)
+            planned = plan(json.loads(read_regular(entry.path)))
+            item["kind"] = planned[0][0]
+            if planned[0][0] == "json_added_keys":
+                item.update(status="preview_only", reason="json_inverse_not_yet_available")
+            else:
+                item["status"] = "ready"
+        except (OSError, ValueError, TypeError, KeyError, UnicodeError, json.JSONDecodeError) as error:
+            item.update(status="blocked", reason=str(error) if isinstance(error, ValueError) else "metadata_unavailable")
+        results.append(item)
+    ready = sum(item["status"] == "ready" for item in results)
+    status = "ready" if ready == len(results) else "blocked"
+    code = 0 if status == "ready" else 2
+    return {"schema_version": 1, "runner": "rollback-preview", "status": status,
+            "dry_run": True, "receipts": len(results), "ready": ready,
+            "blocked": len(results) - ready, "items": results, "exit_code": code}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--receipt", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--receipt")
+    source.add_argument("--receipt-dir")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     try:
         if os.name == "nt":
             raise ValueError("windows_native_rollback_pending")
+        if args.receipt_dir:
+            if args.apply:
+                raise ValueError("batch_apply_not_available")
+            result = preview_directory(args.receipt_dir)
+            print(json.dumps(result, separators=(",", ":")))
+            return result["exit_code"]
         check_receipt_location(args.receipt)
         planned = plan(json.loads(read_regular(args.receipt)))
         if args.apply:

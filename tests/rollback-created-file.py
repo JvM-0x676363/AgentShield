@@ -207,6 +207,29 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
         self.assertFalse(hook.exists())
 
+    def test_run_preview_reports_conflicts_without_removal(self):
+        self.receipt()
+        command = [sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+                   "--receipt-dir", str(self.receipts)]
+        ready = subprocess.run(command, capture_output=True, text=True, check=False)
+        self.assertEqual(ready.returncode, 0, ready.stdout + ready.stderr)
+        self.assertEqual(json.loads(ready.stdout)["ready"], 1)
+        self.assertTrue(self.destination.exists())
+        second = pathlib.Path(self.temp.name) / "second.txt"
+        second.write_bytes(b"managed baseline\n")
+        record_created_file(str(second), b"managed baseline\n", str(self.receipts))
+        second.write_bytes(b"user edit\n")
+        conflict = subprocess.run(command, capture_output=True, text=True, check=False)
+        self.assertEqual(conflict.returncode, 2)
+        report = json.loads(conflict.stdout)
+        self.assertEqual((report["receipts"], report["ready"], report["blocked"]), (2, 1, 1))
+        self.assertNotIn(str(self.destination), conflict.stdout)
+        self.assertTrue(self.destination.exists())
+        self.assertTrue(second.exists())
+        rejected = subprocess.run(command + ["--apply"], capture_output=True, text=True, check=False)
+        self.assertEqual(json.loads(rejected.stdout)["reason"], "batch_apply_not_available")
+        self.assertTrue(self.destination.exists())
+
     def test_unix_engine_appended_guidance_rollback(self):
         base = pathlib.Path(self.temp.name)
         fixture = base / "fixture"
