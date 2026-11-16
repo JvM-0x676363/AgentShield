@@ -43,6 +43,7 @@ New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'targets'),
     $fakeProgramFiles, $fakeProgramData -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repo 'policy') -Destination $fixtureRoot -Recurse
 Copy-Item -LiteralPath (Join-Path $repo 'statusline') -Destination $fixtureRoot -Recurse
+Copy-Item -LiteralPath (Join-Path $repo 'rollback-payloads') -Destination $fixtureRoot -Recurse
 New-PrivateReceiptDirectory -Path $receiptDir
 
 $expectedFiles = @()
@@ -149,4 +150,79 @@ if ($LASTEXITCODE -ne 2 -or $manualResult.status -ne 'blocked' -or
 
 Write-Host "RESULT: Windows isolated managed targets and rollback passed (receipts=$($preview.receipts); admin_gate=$([int]$RequireAdmin.IsPresent))"
 Write-Host 'RESULT: Windows existing managed file blocked batch rollback'
+
+$knownManifestPath = Join-Path $fixtureRoot 'targets\claude-managed.json'
+$knownManifest = [IO.File]::ReadAllText($knownManifestPath) | ConvertFrom-Json
+$knownSpec = @($knownManifest.files | Where-Object { $_.payload_file -eq 'statusline/security-status.py' })
+if ($knownSpec.Count -ne 1) { throw 'known_statusline_target_missing' }
+$knownManifest.files = @($knownSpec[0])
+[IO.File]::WriteAllText($knownManifestPath, ($knownManifest | ConvertTo-Json -Depth 30),
+    [Text.UTF8Encoding]::new($false))
+$priorPath = Join-Path $fixtureRoot 'rollback-payloads\claude-statusline-53a8021.py'
+$priorHash = (Get-FileHash -LiteralPath $priorPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($priorHash -cne 'f04381626792cd3278d670784be37e3dada670c3d9b15cae95f56f394aea5246') {
+    throw 'prior_payload_hash_mismatch'
+}
+
+function Invoke-KnownPriorInstall {
+    param([string]$Directory)
+    New-PrivateReceiptDirectory -Path $Directory
+    [IO.File]::WriteAllBytes($existingFile, [IO.File]::ReadAllBytes($priorPath))
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $engine `
+            -Root $fixtureRoot -Scope machine -Only claude-managed -ReceiptDir $Directory 2>&1)
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = 'Stop' }
+    if ($code -ne 0) {
+        $output | Select-Object -Last 8 | ForEach-Object { Write-Warning $_ }
+        throw 'known_prior_install_failed'
+    }
+    $entries = @(Get-ChildItem -LiteralPath $Directory -Filter '*.json')
+    if ($entries.Count -ne 1) { throw 'known_prior_receipt_count_invalid' }
+    $receipt = [IO.File]::ReadAllText($entries[0].FullName) | ConvertFrom-Json
+    if (@($receipt.operations)[0].kind -ne 'known_prior_payload') {
+        throw 'known_prior_receipt_not_created'
+    }
+    return $entries[0].FullName
+}
+
+$knownReceiptDir = Join-Path $testRoot 'known-prior-receipts'
+$knownReceipt = Invoke-KnownPriorInstall -Directory $knownReceiptDir
+$knownOperation = @(([IO.File]::ReadAllText($knownReceipt) | ConvertFrom-Json).operations)[0]
+$knownPreview = & powershell -NoProfile -File $rollback -ReceiptDir $knownReceiptDir | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $knownPreview.status -ne 'ready' -or $knownPreview.receipts -ne 1) {
+    throw 'known_prior_preview_failed'
+}
+if ((Get-FileHash -LiteralPath $existingFile -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $priorHash) {
+    throw 'known_prior_preview_changed_file'
+}
+$knownApply = & powershell -NoProfile -File $rollback -ReceiptDir $knownReceiptDir -Apply | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $knownApply.status -ne 'restored' -or $knownApply.applied -ne 1 -or
+    (Get-FileHash -LiteralPath $existingFile -Algorithm SHA256).Hash.ToLowerInvariant() -cne $priorHash -or
+    (Get-Item -LiteralPath $existingFile).CreationTimeUtc.Ticks -ne [long]$knownOperation.prior_creation_utc_ticks -or
+    (Get-Item -LiteralPath $existingFile).LastWriteTimeUtc.Ticks -ne [long]$knownOperation.prior_write_utc_ticks) {
+    throw 'known_prior_restore_failed'
+}
+
+$conflictReceiptDir = Join-Path $testRoot 'known-prior-conflict-receipts'
+$null = Invoke-KnownPriorInstall -Directory $conflictReceiptDir
+[IO.File]::AppendAllText($existingFile, 'modified after installation')
+$conflictPreview = & powershell -NoProfile -File $rollback -ReceiptDir $conflictReceiptDir | ConvertFrom-Json
+if ($LASTEXITCODE -ne 2 -or $conflictPreview.status -ne 'blocked') {
+    throw 'known_prior_conflict_not_blocked'
+}
+
+$invalidReceiptDir = Join-Path $testRoot 'known-prior-invalid-receipts'
+$invalidReceiptPath = Invoke-KnownPriorInstall -Directory $invalidReceiptDir
+$invalidReceipt = [IO.File]::ReadAllText($invalidReceiptPath) | ConvertFrom-Json
+$invalidReceipt.operations[0].prior_sha256 = '0' * 64
+[IO.File]::WriteAllText($invalidReceiptPath, ($invalidReceipt | ConvertTo-Json -Depth 10),
+    [Text.UTF8Encoding]::new($false))
+$invalidPreview = & powershell -NoProfile -File $rollback -ReceiptDir $invalidReceiptDir | ConvertFrom-Json
+if ($LASTEXITCODE -ne 2 -or $invalidPreview.status -ne 'blocked') {
+    throw 'known_prior_invalid_digest_not_blocked'
+}
+
+Write-Host 'RESULT: Windows known managed status line restored; changed file and invalid digest blocked'
 Write-Host "Evidence directory: $testRoot"

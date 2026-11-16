@@ -122,6 +122,54 @@ function Write-AgentShieldCreatedReceipt {
     return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
 }
 
+function Write-AgentShieldKnownPriorReceipt {
+    param(
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][string]$ReceiptDir,
+        [Parameter(Mandatory)][string]$PriorId,
+        [Parameter(Mandatory)][string]$PriorSha256,
+        [Parameter(Mandatory)][long]$PriorCreationTicks,
+        [Parameter(Mandatory)][long]$PriorWriteTicks,
+        [Parameter(Mandatory)][byte[]]$InstalledBytes
+    )
+    if ($PriorId -cne 'claude-statusline-53a8021' -or
+        $PriorSha256 -cne 'f04381626792cd3278d670784be37e3dada670c3d9b15cae95f56f394aea5246') {
+        throw 'known_prior_payload_invalid'
+    }
+    $item = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'unsafe_destination_type'
+    }
+    if ($item.Length -ne $InstalledBytes.Length -or $item.Length -gt 1048576) {
+        throw 'installed_size_changed'
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $installedHash = [BitConverter]::ToString($sha.ComputeHash($InstalledBytes)).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+    if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $installedHash -or
+        (Get-Item -LiteralPath $Destination -Force).LastWriteTimeUtc.Ticks -ne $item.LastWriteTimeUtc.Ticks) {
+        throw 'installed_content_changed'
+    }
+    $payload = [ordered]@{
+        schema_version = 1
+        runner = 'agentshield-rollback'
+        operations = @([ordered]@{
+            kind = 'known_prior_payload'
+            target_id = 'claude-managed'
+            destination = [IO.Path]::GetFullPath($Destination)
+            prior_id = $PriorId
+            prior_sha256 = $PriorSha256
+            prior_creation_utc_ticks = $PriorCreationTicks
+            prior_write_utc_ticks = $PriorWriteTicks
+            installed_sha256 = $installedHash
+            installed_creation_utc_ticks = $item.CreationTimeUtc.Ticks
+            installed_write_utc_ticks = $item.LastWriteTimeUtc.Ticks
+            installed_length = [long]$item.Length
+        })
+    }
+    return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
+}
+
 function Write-AgentShieldAppendedBlockReceipt {
     param(
         [Parameter(Mandatory)][string]$Destination,

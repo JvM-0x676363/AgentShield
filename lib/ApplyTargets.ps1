@@ -80,7 +80,8 @@ function Write-Utf8NoBom {
 
 function Write-OrPreview {
     param([string]$Path, [string]$Content, [bool]$Dry, [string]$Verbo = "would write",
-        [bool]$ReversibleExisting = $false)
+        [bool]$ReversibleExisting = $false, [string]$KnownPriorPath,
+        [string]$KnownPriorId, [string]$KnownPriorSha256)
     if ($Dry) {
         Detail "[dry-run] $Verbo $Path ($($Content.Length) bytes)"
         return
@@ -100,10 +101,59 @@ function Write-OrPreview {
         if ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw 'unsafe_destination_type'
         }
-        $reason = $(if ($ReversibleExisting) { 'receipt_incomplete' } else { 'existing_target_has_no_inverse' })
+        $knownPrior = $false
+        if ($KnownPriorPath) {
+            $prior = Get-Item -LiteralPath $KnownPriorPath -Force -ErrorAction Stop
+            if ($prior.PSIsContainer -or ($prior.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $prior.Length -gt 1048576 -or $KnownPriorSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                (Get-FileHash -LiteralPath $KnownPriorPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $KnownPriorSha256) {
+                throw 'known_prior_payload_invalid'
+            }
+            $knownPrior = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $KnownPriorSha256
+        }
+        $priorCreation = $existing.CreationTimeUtc.Ticks
+        $priorWrite = $existing.LastWriteTimeUtc.Ticks
+        $reason = $(if ($ReversibleExisting -or $knownPrior) { 'receipt_incomplete' } else { 'existing_target_has_no_inverse' })
         $guard = Write-AgentShieldManualReviewReceipt -Destination $Path -ReceiptDir $ReceiptDir -Reason $reason
-        Write-Utf8NoBom -Path $Path -Content $Content
+        if ($knownPrior) {
+            $normalized = $Content -replace "`r`n", "`n"
+            $bytes = ([System.Text.UTF8Encoding]::new($false)).GetBytes($normalized)
+            if ($bytes.Length -gt 1048576) { throw 'known_prior_payload_too_large' }
+            $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            try {
+                $locked = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+                if ($locked.CreationTimeUtc.Ticks -ne $priorCreation -or
+                    $locked.LastWriteTimeUtc.Ticks -ne $priorWrite -or $stream.Length -gt 1048576) {
+                    throw 'known_prior_destination_changed'
+                }
+                $currentBytes = [byte[]]::new([int]$stream.Length)
+                $offset = 0
+                while ($offset -lt $currentBytes.Length) {
+                    $count = $stream.Read($currentBytes, $offset, $currentBytes.Length - $offset)
+                    if ($count -le 0) { throw 'known_prior_destination_changed' }
+                    $offset += $count
+                }
+                $sha = [Security.Cryptography.SHA256]::Create()
+                try { $currentHash = [BitConverter]::ToString($sha.ComputeHash($currentBytes)).Replace('-', '').ToLowerInvariant() }
+                finally { $sha.Dispose() }
+                if ($currentHash -cne $KnownPriorSha256) { throw 'known_prior_destination_changed' }
+                $stream.Position = 0
+                $stream.SetLength(0)
+                $stream.Write($bytes, 0, $bytes.Length)
+                $stream.Flush($true)
+            } finally { $stream.Dispose() }
+        } else {
+            Write-Utf8NoBom -Path $Path -Content $Content
+        }
         if ($ReversibleExisting) { return $guard }
+        if ($knownPrior) {
+            Write-AgentShieldKnownPriorReceipt -Destination $Path -ReceiptDir $ReceiptDir `
+                -PriorId $KnownPriorId -PriorSha256 $KnownPriorSha256 `
+                -PriorCreationTicks $priorCreation -PriorWriteTicks $priorWrite `
+                -InstalledBytes $bytes | Out-Null
+            Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+            Remove-Item -LiteralPath $guard -Force
+        }
         return
     }
     $normalized = $Content -replace "`r`n", "`n"
@@ -387,7 +437,16 @@ function Invoke-Overwrite {
     if ($Spec.PSObject.Properties.Name -contains "backup") { $doBackup = [bool]$Spec.backup }
     if ($doBackup) { Backup-File -Path $Dst -Dry $Dry }
 
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry
+    $knownPriorPath = $null
+    $knownPriorId = $null
+    $knownPriorSha256 = $null
+    if ($Spec.payload_file -ceq 'statusline/security-status.py') {
+        $knownPriorId = 'claude-statusline-53a8021'
+        $knownPriorSha256 = 'f04381626792cd3278d670784be37e3dada670c3d9b15cae95f56f394aea5246'
+        $knownPriorPath = Join-Path $RootDir 'rollback-payloads\claude-statusline-53a8021.py'
+    }
+    Write-OrPreview -Path $Dst -Content $content -Dry $Dry -KnownPriorPath $knownPriorPath `
+        -KnownPriorId $knownPriorId -KnownPriorSha256 $knownPriorSha256
     return "written (overwrite)"
 }
 

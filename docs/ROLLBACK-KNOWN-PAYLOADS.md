@@ -2,7 +2,8 @@
 
 This design covers an existing file that AgentShield previously installed and
 later overwrites. It does not authorize a backup of the user profile or of an
-unknown configuration file. The source-checkout rollback pilot remains opt-in.
+unknown configuration file. The first receipt implementation is limited to the
+Windows Claude managed status line in the opt-in source-checkout pilot.
 
 ## Admission
 
@@ -12,10 +13,10 @@ An existing file is eligible only when all of these conditions hold:
    documented prior AgentShield payload for that same target and OS.
 2. The file is regular, has no reparse point or symbolic-link parent escape,
    and its bytes exactly match the SHA-256 of that prior payload.
-3. The prior payload is shipped with the same reviewed rollback package. Its
-   digest is recorded in the manifest and checked before installation and
-   again before restoration. The receipt stores the payload identifier and
-   hashes, never the previous file contents.
+3. The prior payload is present in the same reviewed source checkout. Its
+   digest is pinned in the receipt implementation and checked before
+   installation and again before restoration. The receipt stores the payload
+   identifier and hashes, never the previous file contents.
 4. A private, per-run receipt directory is available before installation.
    A provisional marker is written before the target changes.
 
@@ -25,10 +26,14 @@ private storage or retention contract.
 
 ## Receipt and restoration
 
-The completed receipt records the canonical destination, previous payload ID
+The completed receipt records the absolute destination, previous payload ID
 and SHA-256, installed SHA-256, file identity and timestamps, and the selected
 target. The provisional marker is cleared only after the completed receipt is
 durable. An interrupted operation leaves the marker for operator review.
+
+Restoring an older managed script can lower the security posture. Applying a
+receipt to the real Windows managed status-line path requires an elevated
+operator action; preview remains read-only.
 
 Preview verifies the receipt, the prior packaged payload, current destination
 identity, and installed hash. Apply repeats those checks immediately before a
@@ -37,13 +42,14 @@ write or metadata restoration fails. If the destination has changed, rollback
 does not overwrite it. Batch apply stays blocked when any receipt in the run is
 blocked or preview-only.
 
-The first candidate is the Claude managed status-line script. On the pilot
+The first implementation is the Claude managed status-line script. On the pilot
 Windows endpoint, its installed bytes matched the first public AgentShield
 revision, and a temporary replacement with the current payload made all five
 managed detector checks pass. The canary restored the original file; it did
-not exercise receipt rollback. A synthetic test must prove preview, restore,
-changed-file refusal, wrong-payload refusal, interrupted-write handling, and
-Administrator gating before this receipt kind is enabled.
+not exercise receipt rollback. The isolated Windows test now covers preview,
+restore, changed-file refusal, invalid prior digest, and the existing
+Administrator gate. Interrupted-write behavior relies on the provisional
+marker and still needs a dedicated failure-injection test before release.
 
 ## Files without a known prior payload
 

@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
 | Skip scanners | `-SkipTools` | `--skip-tools` | Defers gitleaks, Semgrep, and Trivy installation. |
 | Skip VS Code | `-SkipVSCode` | `--skip-vscode` | Defers VS Code extension installation. |
 | Machine output | `-OutputMode Console|Json|Quiet` | `--output-mode Console|Json|Quiet` | `Console` is interactive; `Json` emits events; `Quiet` emits only the final JSON result. |
-| Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, newly created hook and scanner files, some appended guidance blocks, and the two Git configuration keys together. Unix JSON key records are preview-only. Pre-existing hooks and scanner files are not reversible. This does not cover the full installation. Omit for normal deployment. |
+| Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, newly created hook and scanner files, some appended guidance blocks, the two Git configuration keys together, and one known previous Windows managed status-line payload. Unix JSON key records are preview-only. Pre-existing hooks and scanner files are not reversible. This does not cover the full installation. Omit for normal deployment. |
 | List targets | `-ListTargets` | `--list-targets` | Lists manifest targets and exits without changes. |
 
 Unix rollback receipts record the resolved parent directory. Preview and apply
@@ -74,6 +74,16 @@ New hook and scanner destinations receive a provisional marker before copying;
 the marker is cleared only after their created-file receipt is recorded. An
 interrupted copy therefore blocks batch apply instead of disappearing from its
 coverage report.
+
+The Windows source-checkout pilot also recognizes the Claude managed status
+line from the first public AgentShield revision. If its current SHA-256 matches
+the packaged prior payload, the installer records a `known_prior_payload`
+receipt without copying previous file contents. Preview verifies both the
+installed file and the prior payload; apply restores the old bytes and
+timestamps only while the installed file still matches. A customized or
+unknown prior file keeps a `manual_review` receipt. See
+[ROLLBACK-KNOWN-PAYLOADS.md](ROLLBACK-KNOWN-PAYLOADS.md). This receipt kind is
+not enabled in the Unix engine or release package.
 
 The source-checkout rollback scripts can preview one experimental run without
 changing files. Windows: `powershell -NoProfile -File scripts/windows/rollback.ps1
@@ -102,7 +112,9 @@ tests/rollback-managed-windows.ps1` exercises copies of the Claude and Codex
 machine manifests with destinations under a temporary directory. The copy
 disables the Administrator requirement only inside the fixture. It verifies
 created-file rollback and the manual-review block for an existing managed
-file. Add `-RequireAdmin` from an elevated PowerShell session to retain and
+file. It also verifies restoration of the known previous status-line payload,
+including a changed-file and invalid-digest refusal. Add `-RequireAdmin` from
+an elevated PowerShell session to retain and
 exercise the manifests' Administrator requirement with the same temporary
 destinations. Neither mode installs into the real Program Files or ProgramData
 locations.

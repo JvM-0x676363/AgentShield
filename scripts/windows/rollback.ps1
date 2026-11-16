@@ -42,7 +42,7 @@ if ($ReceiptDir -or -not $Receipt) {
                     $destinations[$destination].Add($items.Count)
                     if ($result.status -eq 'ready') {
                         $priority = $(if ($item['kind'] -in @('git_config', 'git_config_pair')) { 0 }
-                            elseif ($item['kind'] -eq 'appended_block') { 1 } else { 2 })
+                            elseif ($item['kind'] -in @('appended_block', 'known_prior_payload')) { 1 } else { 2 })
                         $prepared += [pscustomobject]@{
                             Priority = $priority; Id = $entry.BaseName; Path = $entry.FullName
                             Digest = $beforeDigest; Index = $items.Count
@@ -151,7 +151,7 @@ try {
     if ($metadata.schema_version -ne 1 -or $metadata.runner -ne 'agentshield-rollback' -or
         @($metadata.operations).Count -ne 1) { throw 'invalid_receipt' }
     $operation = @($metadata.operations)[0]
-    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair', 'manual_review')) { throw 'unsupported_operation' }
+    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair', 'manual_review', 'known_prior_payload')) { throw 'unsupported_operation' }
     $destination = [string]$operation.destination
     Assert-AgentShieldLocalReceiptPath -LiteralPath $destination
     if ([IO.Path]::GetFullPath($destination) -ne $destination) { throw 'invalid_destination' }
@@ -165,9 +165,35 @@ try {
         } | ConvertTo-Json -Compress
         exit 2
     }
-    if ($operation.kind -in @('created_file', 'appended_block')) {
+    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload')) {
         $expected = [string]$operation.installed_sha256
         if ($expected -cnotmatch '^[0-9a-f]{64}$') { throw 'invalid_digest' }
+        if ($operation.kind -eq 'known_prior_payload') {
+            $managedDestination = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'ClaudeCode\statusline-security.py'
+            if ($Apply -and $destination -ieq $managedDestination) {
+                $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+                $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+                if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+                    throw 'administrator_required'
+                }
+            }
+            if ([string]$operation.target_id -cne 'claude-managed' -or
+                [string]$operation.prior_id -cne 'claude-statusline-53a8021' -or
+                [string]$operation.prior_sha256 -cne 'f04381626792cd3278d670784be37e3dada670c3d9b15cae95f56f394aea5246' -or
+                [long]$operation.prior_creation_utc_ticks -le 0 -or
+                [long]$operation.prior_write_utc_ticks -le 0 -or
+                [long]$operation.installed_length -gt 1048576) {
+                throw 'known_prior_payload_invalid'
+            }
+            $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+            $priorPath = Join-Path $repoRoot 'rollback-payloads\claude-statusline-53a8021.py'
+            $priorItem = Get-Item -LiteralPath $priorPath -Force -ErrorAction Stop
+            if ($priorItem.PSIsContainer -or ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $priorItem.Length -gt 1048576 -or
+                (Get-FileHash -LiteralPath $priorPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$operation.prior_sha256) {
+                throw 'known_prior_payload_invalid'
+            }
+        }
     } elseif ($operation.kind -eq 'git_config') {
         if ($operation.key -notin @('core.hooksPath', 'init.templateDir') -or
             -not [string]$operation.installed_value -or
@@ -178,7 +204,7 @@ try {
         if ($null -ne $operation.previous_value -and [string]$operation.previous_value -match '[\x00\r\n]') {
             throw 'invalid_git_config_operation'
         }
-    } else {
+    } elseif ($operation.kind -eq 'git_config_pair') {
         $pair = $operation.values
         $keys = @($pair.PSObject.Properties.Name)
         if ($keys.Count -ne 2 -or
@@ -208,7 +234,7 @@ try {
         [long]$operation.installed_write_utc_ticks -ne [long]$item.LastWriteTimeUtc.Ticks) {
         throw 'destination_replaced_or_reinstalled'
     }
-    if ($operation.kind -in @('created_file', 'appended_block')) {
+    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload')) {
         if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) {
             throw 'destination_changed'
         }
@@ -236,7 +262,44 @@ try {
             $again.LastWriteTimeUtc.Ticks -ne [long]$operation.installed_write_utc_ticks) {
             throw 'destination_changed'
         }
-        if ($operation.kind -eq 'appended_block') {
+        if ($operation.kind -eq 'known_prior_payload') {
+            $priorBytes = [IO.File]::ReadAllBytes($priorPath)
+            if ((Get-BytesSha256 $priorBytes) -cne [string]$operation.prior_sha256) {
+                throw 'known_prior_payload_invalid'
+            }
+            $stream = [IO.File]::Open($destination, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            try {
+                $locked = Get-Item -LiteralPath $destination -Force -ErrorAction Stop
+                if ($locked.PSIsContainer -or ($locked.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                    $locked.Length -ne [long]$operation.installed_length -or
+                    $locked.CreationTimeUtc.Ticks -ne [long]$operation.installed_creation_utc_ticks -or
+                    $locked.LastWriteTimeUtc.Ticks -ne [long]$operation.installed_write_utc_ticks) {
+                    throw 'destination_changed'
+                }
+                $currentBytes = [byte[]]::new([int]$stream.Length)
+                $offset = 0
+                while ($offset -lt $currentBytes.Length) {
+                    $count = $stream.Read($currentBytes, $offset, $currentBytes.Length - $offset)
+                    if ($count -le 0) { throw 'destination_changed' }
+                    $offset += $count
+                }
+                if ((Get-BytesSha256 $currentBytes) -cne $expected) { throw 'destination_changed' }
+                $stream.Position = 0
+                $stream.SetLength(0)
+                $stream.Write($priorBytes, 0, $priorBytes.Length)
+                $stream.Flush($true)
+            } catch {
+                if ($_.Exception.Message -eq 'destination_changed') { throw }
+                throw 'known_prior_partial_restore'
+            } finally { $stream.Dispose() }
+            try {
+                [IO.File]::SetCreationTimeUtc($destination, [DateTime]::new([long]$operation.prior_creation_utc_ticks, [DateTimeKind]::Utc))
+                [IO.File]::SetLastWriteTimeUtc($destination, [DateTime]::new([long]$operation.prior_write_utc_ticks, [DateTimeKind]::Utc))
+                if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$operation.prior_sha256) {
+                    throw 'known_prior_partial_restore'
+                }
+            } catch { throw 'known_prior_partial_restore' }
+        } elseif ($operation.kind -eq 'appended_block') {
             $stream = [IO.File]::Open($destination, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
             try {
                 $locked = Get-Item -LiteralPath $destination -Force -ErrorAction Stop
@@ -300,7 +363,7 @@ try {
     [ordered]@{
         schema_version = 1
         runner = 'rollback'
-        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'git_config_pair', 'appended_block')) { 'restored' } else { 'removed' })
+        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'git_config_pair', 'appended_block', 'known_prior_payload')) { 'restored' } else { 'removed' })
         dry_run = -not [bool]$Apply
         files = 1
         exit_code = 0
@@ -310,7 +373,7 @@ try {
     [ordered]@{
         schema_version = 1
         runner = 'rollback'
-        status = $(if ($_.Exception.Message -eq 'git_config_partial_restore') { 'partial' } else { 'blocked' })
+        status = $(if ($_.Exception.Message -in @('git_config_partial_restore', 'known_prior_partial_restore')) { 'partial' } else { 'blocked' })
         reason = $(if ($_.Exception.Message -match '^[a-z_]+$') { $_.Exception.Message } else { 'metadata_unavailable' })
         exit_code = 2
     } | ConvertTo-Json -Compress
