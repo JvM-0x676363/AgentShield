@@ -32,10 +32,23 @@ def check_receipt_location(path):
     if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
         raise ValueError("receipt_directory_wrong_owner")
     receipt = os.lstat(path)
+    if not stat.S_ISREG(receipt.st_mode) or receipt.st_nlink != 1:
+        raise ValueError("unsafe_receipt_type")
     if receipt.st_mode & 0o077:
         raise ValueError("receipt_not_private")
     if hasattr(os, "geteuid") and receipt.st_uid != os.geteuid():
         raise ValueError("receipt_wrong_owner")
+
+
+def check_parent_location(item, destination):
+    parent = os.path.dirname(os.path.abspath(destination))
+    current = os.path.realpath(parent)
+    recorded = item.get("parent_realpath")
+    if recorded is None:
+        if current != parent:
+            raise ValueError("unverified_parent_link")
+    elif not isinstance(recorded, str) or not os.path.isabs(recorded) or current != recorded:
+        raise ValueError("destination_parent_changed")
 
 
 def plan(receipt):
@@ -52,6 +65,7 @@ def plan(receipt):
         dest = item.get("destination")
         if not isinstance(dest, str) or not os.path.isabs(dest) or dest in seen:
             raise ValueError("invalid_destination")
+        check_parent_location(item, dest)
         identity = tuple(item.get(key) for key in ("installed_device", "installed_inode", "installed_mtime_ns"))
         if any(type(value) is not int or value < 0 for value in identity):
             raise ValueError("invalid_file_identity")
@@ -140,6 +154,7 @@ def main():
             # Recheck each file immediately before removal. A changed file is
             # preserved and reported as a conflict.
             for kind, dest, expected, identity, item in planned:
+                check_parent_location(item, dest)
                 if kind == "git_config":
                     restore_key(dest, item["key"], expected, item["previous_value"], identity)
                     continue

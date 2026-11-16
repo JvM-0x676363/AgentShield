@@ -67,6 +67,39 @@ class CreatedFileReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "destination_replaced_or_reinstalled"):
             plan(receipt)
 
+    def test_parent_link_retarget_is_rejected(self):
+        base = pathlib.Path(self.temp.name)
+        original = base / "original"
+        replacement = base / "replacement"
+        original.mkdir()
+        replacement.mkdir()
+        link = base / "current"
+        try:
+            link.symlink_to(original, target_is_directory=True)
+        except OSError:
+            self.skipTest("symlink creation unavailable")
+        destination = link / "managed.txt"
+        (original / "managed.txt").write_bytes(b"managed baseline\n")
+        record_created_file(str(destination), b"managed baseline\n", str(self.receipts))
+        receipt = json.loads(next(self.receipts.glob("*.json")).read_text())
+        self.assertEqual(len(plan(receipt)), 1)
+        link.unlink()
+        link.symlink_to(replacement, target_is_directory=True)
+        (replacement / "managed.txt").write_bytes(b"managed baseline\n")
+        with self.assertRaisesRegex(ValueError, "destination_parent_changed"):
+            plan(receipt)
+
+    def test_receipt_symlink_is_rejected(self):
+        self.receipt()
+        receipt = next(self.receipts.glob("*.json"))
+        link = self.receipts / "linked.json"
+        try:
+            link.symlink_to(receipt)
+        except OSError:
+            self.skipTest("symlink creation unavailable")
+        with self.assertRaisesRegex(ValueError, "unsafe_receipt_type"):
+            check_receipt_location(str(link))
+
     def test_broad_receipt_directory_is_rejected(self):
         self.receipts.mkdir(mode=0o755)
         self.receipts.chmod(0o755)

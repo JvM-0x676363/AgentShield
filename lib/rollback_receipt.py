@@ -32,6 +32,10 @@ def assert_empty_private_directory(path):
             raise ValueError("receipt_directory_not_empty")
 
 
+def resolved_parent(path):
+    return os.path.realpath(os.path.dirname(os.path.abspath(path)))
+
+
 def record_created_file(destination, installed_content, receipt_dir):
     """Write an immutable receipt for a file that did not exist before install."""
     ensure_private_directory(receipt_dir)
@@ -47,6 +51,7 @@ def record_created_file(destination, installed_content, receipt_dir):
         "operations": [{
             "kind": "created_file",
             "destination": os.path.abspath(destination),
+            "parent_realpath": resolved_parent(destination),
             "installed_sha256": hashlib.sha256(installed_content).hexdigest(),
             "installed_device": info.st_dev,
             "installed_inode": info.st_ino,
@@ -84,6 +89,7 @@ def record_json_added_keys(destination, installed_content, receipt_dir, added_ke
         "operations": [{
             "kind": "json_added_keys",
             "destination": os.path.abspath(destination),
+            "parent_realpath": resolved_parent(destination),
             "installed_sha256": hashlib.sha256(installed_content).hexdigest(),
             "installed_device": info.st_dev,
             "installed_inode": info.st_ino,
@@ -124,6 +130,7 @@ def record_git_config(config_path, key, installed_value, previous_value, receipt
         "operations": [{
             "kind": "git_config",
             "destination": os.path.abspath(config_path),
+            "parent_realpath": resolved_parent(config_path),
             "key": key,
             "installed_value": installed_value,
             "previous_value": previous_value,
@@ -164,6 +171,7 @@ def record_appended_block(destination, prior_bytes, installed_bytes, receipt_dir
         "operations": [{
             "kind": "appended_block",
             "destination": os.path.abspath(destination),
+            "parent_realpath": resolved_parent(destination),
             "installed_sha256": hashlib.sha256(installed_bytes).hexdigest(),
             "prior_length": len(prior_bytes),
             "prior_sha256": hashlib.sha256(prior_bytes).hexdigest(),
@@ -213,6 +221,7 @@ def record_git_config_pair(config_path, values, receipt_dir):
         "operations": [{
             "kind": "git_config_pair",
             "destination": os.path.abspath(config_path),
+            "parent_realpath": resolved_parent(config_path),
             "values": values,
             "installed_device": info.st_dev,
             "installed_inode": info.st_ino,

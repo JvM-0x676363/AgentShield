@@ -51,6 +51,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
 | Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, some appended guidance blocks, and the two Git configuration keys together. Unix JSON key records are preview-only. This does not cover the full installation. Omit for normal deployment. |
 | List targets | `-ListTargets` | `--list-targets` | Lists manifest targets and exits without changes. |
 
+Unix rollback receipts record the resolved parent directory. Preview and apply
+reject a destination redirected through a changed symbolic link. Older pilot
+receipts without this field are accepted only when the parent path has no
+symbolic link.
+
 `-Only` filters AI configuration only. Git hooks, scanner tools, and VS Code
 extensions remain separate layers controlled by their dedicated flags.
 
