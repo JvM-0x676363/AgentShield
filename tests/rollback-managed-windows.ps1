@@ -260,6 +260,37 @@ if ($LASTEXITCODE -ne 2 -or $interruptedResult.status -ne 'blocked' -or
     throw 'interrupted_known_prior_rollback_not_blocked'
 }
 
+[IO.File]::AppendAllText($faultReceiptHelper,
+    "`nfunction Write-AgentShieldKnownPriorReceipt { [Diagnostics.Process]::GetCurrentProcess().Kill() }`n")
+$killedReceiptDir = Join-Path $testRoot 'known-prior-killed-receipts'
+New-PrivateReceiptDirectory -Path $killedReceiptDir
+[IO.File]::WriteAllBytes($existingFile, [IO.File]::ReadAllBytes($priorPath))
+$ErrorActionPreference = 'Continue'
+try {
+    $null = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $faultEngine `
+        -Root $fixtureRoot -Scope machine -Only claude-managed -ReceiptDir $killedReceiptDir 2>&1)
+    $killedExit = $LASTEXITCODE
+} finally { $ErrorActionPreference = 'Stop' }
+if ($killedExit -eq 0) { throw 'child_process_was_not_killed' }
+$killedReceipts = @(Get-ChildItem -LiteralPath $killedReceiptDir -Filter '*.json')
+if ($killedReceipts.Count -ne 1) { throw 'killed_process_receipt_count_invalid' }
+$killedOperation = @(([IO.File]::ReadAllText($killedReceipts[0].FullName) | ConvertFrom-Json).operations)[0]
+if ($killedOperation.kind -ne 'manual_review' -or
+    $killedOperation.reason -ne 'receipt_incomplete') {
+    throw 'killed_process_marker_missing'
+}
+$killedFileHash = (Get-FileHash -LiteralPath $existingFile -Algorithm SHA256).Hash
+if ($killedFileHash.ToLowerInvariant() -ceq $priorHash) {
+    throw 'child_process_killed_before_write'
+}
+$killedResult = & powershell -NoProfile -File $rollback -ReceiptDir $killedReceiptDir -Apply | ConvertFrom-Json
+if ($LASTEXITCODE -ne 2 -or $killedResult.status -ne 'blocked' -or
+    $killedResult.applied -ne 0 -or
+    (Get-FileHash -LiteralPath $existingFile -Algorithm SHA256).Hash -cne $killedFileHash) {
+    throw 'killed_process_batch_rollback_not_blocked'
+}
+
 Write-Host 'RESULT: Windows known managed status line restored; changed file and invalid digest blocked'
 Write-Host 'RESULT: Windows interrupted known-payload receipt blocked batch rollback'
+Write-Host 'RESULT: Windows killed child process left provisional receipt and blocked batch rollback'
 Write-Host "Evidence directory: $testRoot"

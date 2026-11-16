@@ -50,7 +50,8 @@ not exercise receipt rollback. The isolated Windows test now covers preview,
 restore, changed-file refusal, invalid prior digest, and the existing
 Administrator gate. It also injects a receipt-writing failure after the
 managed file changes and confirms that the provisional marker blocks batch
-rollback. A process-kill test remains for release qualification.
+rollback. A separate fixture kills only the installer child process at that
+same point; the surviving marker again blocks batch rollback.
 
 ## Files without a known prior payload
 

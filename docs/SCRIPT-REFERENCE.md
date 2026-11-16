@@ -115,7 +115,9 @@ created-file rollback and the manual-review block for an existing managed
 file. It also verifies restoration of the known previous status-line payload,
 including changed-file and invalid-digest refusal. A fixture injects a
 receipt-writing failure after the file changes and verifies that the surviving
-provisional marker blocks batch rollback. Add `-RequireAdmin` from
+provisional marker blocks batch rollback. It also kills the isolated installer
+child process at that point and checks the same fail-closed result. Add
+`-RequireAdmin` from
 an elevated PowerShell session to retain and
 exercise the manifests' Administrator requirement with the same temporary
 destinations. Neither mode installs into the real Program Files or ProgramData
