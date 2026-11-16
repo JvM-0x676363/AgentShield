@@ -48,8 +48,9 @@ revision, and a temporary replacement with the current payload made all five
 managed detector checks pass. The canary restored the original file; it did
 not exercise receipt rollback. The isolated Windows test now covers preview,
 restore, changed-file refusal, invalid prior digest, and the existing
-Administrator gate. Interrupted-write behavior relies on the provisional
-marker and still needs a dedicated failure-injection test before release.
+Administrator gate. It also injects a receipt-writing failure after the
+managed file changes and confirms that the provisional marker blocks batch
+rollback. A process-kill test remains for release qualification.
 
 ## Files without a known prior payload
 

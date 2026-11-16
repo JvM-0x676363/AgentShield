@@ -113,7 +113,9 @@ machine manifests with destinations under a temporary directory. The copy
 disables the Administrator requirement only inside the fixture. It verifies
 created-file rollback and the manual-review block for an existing managed
 file. It also verifies restoration of the known previous status-line payload,
-including a changed-file and invalid-digest refusal. Add `-RequireAdmin` from
+including changed-file and invalid-digest refusal. A fixture injects a
+receipt-writing failure after the file changes and verifies that the surviving
+provisional marker blocks batch rollback. Add `-RequireAdmin` from
 an elevated PowerShell session to retain and
 exercise the manifests' Administrator requirement with the same temporary
 destinations. Neither mode installs into the real Program Files or ProgramData

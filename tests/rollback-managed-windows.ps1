@@ -224,5 +224,42 @@ if ($LASTEXITCODE -ne 2 -or $invalidPreview.status -ne 'blocked') {
     throw 'known_prior_invalid_digest_not_blocked'
 }
 
+$faultLib = Join-Path $fixtureRoot 'lib'
+New-Item -ItemType Directory -Path $faultLib -Force | Out-Null
+$faultEngine = Join-Path $faultLib 'ApplyTargets.ps1'
+$faultReceiptHelper = Join-Path $faultLib 'RollbackReceipt.ps1'
+Copy-Item -LiteralPath $engine -Destination $faultEngine
+Copy-Item -LiteralPath (Join-Path $repo 'lib\RollbackReceipt.ps1') -Destination $faultReceiptHelper
+[IO.File]::AppendAllText($faultReceiptHelper,
+    "`nfunction Write-AgentShieldKnownPriorReceipt { throw 'injected_receipt_failure' }`n")
+$interruptedReceiptDir = Join-Path $testRoot 'known-prior-interrupted-receipts'
+New-PrivateReceiptDirectory -Path $interruptedReceiptDir
+[IO.File]::WriteAllBytes($existingFile, [IO.File]::ReadAllBytes($priorPath))
+$ErrorActionPreference = 'Continue'
+try {
+    $faultOutput = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $faultEngine `
+        -Root $fixtureRoot -Scope machine -Only claude-managed -ReceiptDir $interruptedReceiptDir 2>&1)
+    $faultExit = $LASTEXITCODE
+} finally { $ErrorActionPreference = 'Stop' }
+if ($faultExit -eq 0) { throw 'receipt_failure_not_injected' }
+$interruptedReceipts = @(Get-ChildItem -LiteralPath $interruptedReceiptDir -Filter '*.json')
+if ($interruptedReceipts.Count -ne 1) { throw 'interrupted_receipt_count_invalid' }
+$interruptedOperation = @(([IO.File]::ReadAllText($interruptedReceipts[0].FullName) | ConvertFrom-Json).operations)[0]
+if ($interruptedOperation.kind -ne 'manual_review' -or
+    $interruptedOperation.reason -ne 'receipt_incomplete') {
+    throw 'interrupted_receipt_marker_missing'
+}
+$interruptedFileHash = (Get-FileHash -LiteralPath $existingFile -Algorithm SHA256).Hash
+if ($interruptedFileHash.ToLowerInvariant() -ceq $priorHash) {
+    throw 'receipt_failure_happened_before_write'
+}
+$interruptedResult = & powershell -NoProfile -File $rollback -ReceiptDir $interruptedReceiptDir -Apply | ConvertFrom-Json
+if ($LASTEXITCODE -ne 2 -or $interruptedResult.status -ne 'blocked' -or
+    $interruptedResult.applied -ne 0 -or
+    (Get-FileHash -LiteralPath $existingFile -Algorithm SHA256).Hash -cne $interruptedFileHash) {
+    throw 'interrupted_known_prior_rollback_not_blocked'
+}
+
 Write-Host 'RESULT: Windows known managed status line restored; changed file and invalid digest blocked'
+Write-Host 'RESULT: Windows interrupted known-payload receipt blocked batch rollback'
 Write-Host "Evidence directory: $testRoot"
