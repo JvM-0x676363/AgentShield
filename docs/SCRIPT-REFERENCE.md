@@ -102,8 +102,10 @@ tests/rollback-managed-windows.ps1` exercises copies of the Claude and Codex
 machine manifests with destinations under a temporary directory. The copy
 disables the Administrator requirement only inside the fixture. It verifies
 created-file rollback and the manual-review block for an existing managed
-file. It does not test administrative installation into the real Program Files
-or ProgramData locations.
+file. Add `-RequireAdmin` from an elevated PowerShell session to retain and
+exercise the manifests' Administrator requirement with the same temporary
+destinations. Neither mode installs into the real Program Files or ProgramData
+locations.
 
 For a non-root Linux, WSL, or macOS source-checkout pilot, run
 `bash tests/rollback-install-unix.sh`. It uses a private temporary profile and

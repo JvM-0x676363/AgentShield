@@ -1,3 +1,5 @@
+param([switch]$RequireAdmin)
+
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $testRoot = Join-Path $repo ('tmp\rollback-managed-windows-' + [Guid]::NewGuid().ToString('N'))
@@ -8,6 +10,14 @@ $fakeProgramData = Join-Path $systemRoot 'ProgramData'
 $receiptDir = Join-Path $testRoot 'receipts'
 $engine = Join-Path $repo 'lib\ApplyTargets.ps1'
 $rollback = Join-Path $repo 'scripts\windows\rollback.ps1'
+
+if ($RequireAdmin) {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'Run -RequireAdmin from an elevated PowerShell session.'
+    }
+}
 
 function New-PrivateReceiptDirectory {
     param([string]$Path)
@@ -42,7 +52,7 @@ foreach ($targetId in @('claude-managed', 'codex-managed')) {
     if ($manifest.scope -ne 'machine' -or $manifest.requires_admin -ne $true) {
         throw 'unexpected_machine_manifest'
     }
-    $manifest.requires_admin = $false
+    if (-not $RequireAdmin) { $manifest.requires_admin = $false }
     foreach ($spec in $manifest.files) {
         $windowsDestination = [string]$spec.dest.windows
         if (-not $windowsDestination) { continue }
@@ -137,6 +147,6 @@ if ($LASTEXITCODE -ne 2 -or $manualResult.status -ne 'blocked' -or
     throw 'existing_machine_file_batch_was_applied'
 }
 
-Write-Host "RESULT: Windows isolated managed targets and rollback passed (receipts=$($preview.receipts))"
+Write-Host "RESULT: Windows isolated managed targets and rollback passed (receipts=$($preview.receipts); admin_gate=$([int]$RequireAdmin.IsPresent))"
 Write-Host 'RESULT: Windows existing managed file blocked batch rollback'
 Write-Host "Evidence directory: $testRoot"
