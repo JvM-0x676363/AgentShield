@@ -287,7 +287,7 @@ $InstalledScannerRules = Join-Path $HooksDir "agent-shield-rules"
 Info "Configuring core.hooksPath -> $HooksDir"
 if (-not $DryRun) {
     New-Item -ItemType Directory -Force -Path $HooksDir | Out-Null
-    git config --global core.hooksPath $HooksDir
+    if (-not $ExperimentalReceiptDir) { git config --global core.hooksPath $HooksDir }
     Copy-Item -LiteralPath $ScannerRunner -Destination $InstalledScannerRunner -Force
     New-Item -ItemType Directory -Force -Path $InstalledScannerRules | Out-Null
     Copy-Item -Path (Join-Path $ScannerRules "*") -Destination $InstalledScannerRules -Recurse -Force
@@ -329,7 +329,17 @@ if (-not $DryRun) {
     if (Test-Path $PreCommit) {
         Copy-Item $PreCommit (Join-Path $TemplateHooksDir "pre-commit") -Force
     }
-    git config --global init.templateDir $TemplateDir
+    if ($ExperimentalReceiptDir) {
+        try {
+            Set-AgentShieldGitConfigPairWithReceipt -ConfigPath (Join-Path $env:USERPROFILE '.gitconfig') `
+                -HooksDir $HooksDir -TemplateDir $TemplateDir -ReceiptDir $ExperimentalReceiptDir | Out-Null
+        } catch {
+            Err "Git configuration receipt failed: $($_.Exception.Message)"
+            $failedTargets = 1
+        }
+    } else {
+        git config --global init.templateDir $TemplateDir
+    }
 } else {
     Info "  [dry-run] mkdir $TemplateHooksDir"
     Info "  [dry-run] git config --global init.templateDir $TemplateDir"

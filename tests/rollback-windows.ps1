@@ -183,6 +183,27 @@ try {
         (Get-AgentShieldGitConfigValue -ConfigPath $configPath -Key 'core.hooksPath') -cne 'C:\user-changed') {
         throw 'git_new_key_not_unset'
     }
+    $pairReceipt = Set-AgentShieldGitConfigPairWithReceipt -ConfigPath $configPath `
+        -HooksDir 'C:\pair-hooks' -TemplateDir 'C:\pair-template' -ReceiptDir $receiptDir
+    if (-not $pairReceipt) { throw 'git_pair_receipt_missing' }
+    $pairPreview = & powershell -NoProfile -File $rollback -Receipt $pairReceipt | ConvertFrom-Json
+    if ($pairPreview.status -ne 'ready') { throw 'git_pair_preview_failed' }
+    $pairRestored = & powershell -NoProfile -File $rollback -Receipt $pairReceipt -Apply | ConvertFrom-Json
+    if ($pairRestored.status -ne 'restored' -or
+        (Get-AgentShieldGitConfigValue -ConfigPath $configPath -Key 'core.hooksPath') -cne 'C:\user-changed' -or
+        $null -ne (Get-AgentShieldGitConfigValue -ConfigPath $configPath -Key 'init.templateDir') -or
+        (& git config --file $configPath --get user.name) -cne 'kept') {
+        throw 'git_pair_restore_failed'
+    }
+    $pairConflictReceipt = Set-AgentShieldGitConfigPairWithReceipt -ConfigPath $configPath `
+        -HooksDir 'C:\pair-hooks' -TemplateDir 'C:\pair-template' -ReceiptDir $receiptDir
+    & git config --file $configPath core.hooksPath 'C:\user-new-hooks' | Out-Null
+    $pairConflict = & powershell -NoProfile -File $rollback -Receipt $pairConflictReceipt -Apply | ConvertFrom-Json
+    if ($pairConflict.status -ne 'blocked' -or
+        (Get-AgentShieldGitConfigValue -ConfigPath $configPath -Key 'core.hooksPath') -cne 'C:\user-new-hooks' -or
+        (Get-AgentShieldGitConfigValue -ConfigPath $configPath -Key 'init.templateDir') -cne 'C:\pair-template') {
+        throw 'git_pair_conflict_not_preserved'
+    }
     Write-Output 'RESULT: Windows rollback synthetic checks passed'
 } finally {
     $absolute = [IO.Path]::GetFullPath($testRoot)

@@ -203,3 +203,50 @@ function Set-AgentShieldGitConfigWithReceipt {
     }
     return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
 }
+
+function Set-AgentShieldGitConfigPairWithReceipt {
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath,
+        [Parameter(Mandatory)][string]$HooksDir,
+        [Parameter(Mandatory)][string]$TemplateDir,
+        [Parameter(Mandatory)][string]$ReceiptDir
+    )
+    Assert-AgentShieldPrivateReceiptPath -LiteralPath $ReceiptDir -Directory
+    Assert-AgentShieldLocalReceiptPath -LiteralPath $HooksDir
+    Assert-AgentShieldLocalReceiptPath -LiteralPath $TemplateDir
+    $ConfigPath = [IO.Path]::GetFullPath($ConfigPath)
+    $previousHooks = Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key 'core.hooksPath'
+    $previousTemplate = Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key 'init.templateDir'
+    if ($previousHooks -ceq $HooksDir -and $previousTemplate -ceq $TemplateDir) { return $null }
+    if ($previousHooks -cne $HooksDir) {
+        & git config --file $ConfigPath core.hooksPath $HooksDir 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0 -or
+            (Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key 'core.hooksPath') -cne $HooksDir) {
+            throw 'git_config_pair_write_failed'
+        }
+    }
+    if ($previousTemplate -cne $TemplateDir) {
+        & git config --file $ConfigPath init.templateDir $TemplateDir 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0 -or
+            (Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key 'init.templateDir') -cne $TemplateDir) {
+            throw 'git_config_pair_write_failed'
+        }
+    }
+    $item = Get-Item -LiteralPath $ConfigPath -Force -ErrorAction Stop
+    $payload = [ordered]@{
+        schema_version = 1
+        runner = 'agentshield-rollback'
+        operations = @([ordered]@{
+            kind = 'git_config_pair'
+            destination = $ConfigPath
+            values = [ordered]@{
+                'core.hooksPath' = [ordered]@{ installed_value = $HooksDir; previous_value = $previousHooks }
+                'init.templateDir' = [ordered]@{ installed_value = $TemplateDir; previous_value = $previousTemplate }
+            }
+            installed_creation_utc_ticks = $item.CreationTimeUtc.Ticks
+            installed_write_utc_ticks = $item.LastWriteTimeUtc.Ticks
+            installed_length = [long]$item.Length
+        })
+    }
+    return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
+}

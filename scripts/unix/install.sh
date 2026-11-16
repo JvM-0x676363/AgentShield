@@ -120,7 +120,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
-    if [[ ! -f "$SCRIPT_DIR/scripts/rollback/rollback.py" ]]; then
+    if [[ ! -f "$SCRIPT_DIR/scripts/rollback/rollback.py" || ! -f "$SCRIPT_DIR/lib/git_config_receipt.py" ]]; then
         error "--experimental-receipt-dir requires the source checkout with the rollback entry point"
         exit 2
     fi
@@ -454,7 +454,9 @@ echo -e "\n${CYAN}[Git Global Hooks - Audit Mode]${NC}"
 emit_event phase git_hooks
 
 run "mkdir -p '$GIT_HOOKS_DIR'"
-run "git config --file '$TARGET_HOME/.gitconfig' core.hooksPath '$GIT_HOOKS_DIR'"
+if [[ -z "$EXPERIMENTAL_RECEIPT_DIR" || "$DRY_RUN" == true ]]; then
+    run "git config --file '$TARGET_HOME/.gitconfig' core.hooksPath '$GIT_HOOKS_DIR'"
+fi
 
 PRE_COMMIT="$GIT_HOOKS_DIR/pre-commit"
 SCANNER_RUNNER="$GIT_HOOKS_DIR/agent-shield-scan.py"
@@ -500,7 +502,16 @@ run "mkdir -p '$GIT_TEMPLATE/hooks'"
 run "find '$GIT_TEMPLATE/hooks' -maxdepth 1 -name 'pre-commit.bak*' -delete 2>/dev/null || true"
 run "cp '$PRE_COMMIT' '$GIT_TEMPLATE/hooks/pre-commit' 2>/dev/null || true"
 run "chmod +x '$GIT_TEMPLATE/hooks/pre-commit' 2>/dev/null || true"
-run "git config --file '$TARGET_HOME/.gitconfig' init.templateDir '$GIT_TEMPLATE'"
+if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
+    if ! "$PY" "$SCRIPT_DIR/lib/git_config_receipt.py" \
+        --config-path "$TARGET_HOME/.gitconfig" --hooks-dir "$GIT_HOOKS_DIR" \
+        --template-dir "$GIT_TEMPLATE" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+        error "Git configuration receipt failed; review the current Git values"
+        FAILED_TARGETS=1
+    fi
+else
+    run "git config --file '$TARGET_HOME/.gitconfig' init.templateDir '$GIT_TEMPLATE'"
+fi
 
 # Admin pass wrote files inside another user's profile. Return ownership,
 # including the directly modified .gitconfig above.

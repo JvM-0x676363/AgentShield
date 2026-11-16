@@ -559,6 +559,7 @@ foreach ($user in $targetUsers) {
         }
 
         if (-not $DryRun) {
+            $gitReceiptError = $null
             New-Item -ItemType Directory -Force -Path (Join-Path $userTemplateDir "hooks") | Out-Null
             if (Test-Path $userPreCommit) {
                 Copy-Item $userPreCommit (Join-Path $userTemplateDir "hooks\pre-commit") -Force
@@ -566,9 +567,19 @@ foreach ($user in $targetUsers) {
             # git config --file writes directly to target user's .gitconfig.
             # Replaces previous scheduled task approach that only worked
             # if user was logged in during deploy.
-            git config --file "$userGitConfig" core.hooksPath "$userHooksDir"
-            git config --file "$userGitConfig" init.templateDir "$userTemplateDir"
-            Info "    git config: written to $userGitConfig"
+            if ($ExperimentalReceiptDir) {
+                try {
+                    Set-AgentShieldGitConfigPairWithReceipt -ConfigPath $userGitConfig `
+                        -HooksDir $userHooksDir -TemplateDir $userTemplateDir `
+                        -ReceiptDir $ExperimentalReceiptDir | Out-Null
+                } catch {
+                    $gitReceiptError = $_.Exception.Message
+                }
+            } else {
+                git config --file "$userGitConfig" core.hooksPath "$userHooksDir"
+                git config --file "$userGitConfig" init.templateDir "$userTemplateDir"
+            }
+            if (-not $gitReceiptError) { Info "    git config: written to $userGitConfig" }
 
             Write-AgentShieldEvent -Event "phase" -Phase "ownership_repair"
             # Grant file ownership back to profile owner.
@@ -585,6 +596,7 @@ foreach ($user in $targetUsers) {
             # -- the directory tree belongs to it.
             Grant-UserOwnership -Path (Join-Path $user.Profile ".gemini") -Username $user.Username
             Grant-UserOwnership -Path (Join-Path $user.Profile "AppData\Roaming\Code\User") -Username $user.Username
+            if ($gitReceiptError) { throw "Git configuration receipt failed: $gitReceiptError" }
         } else {
             Info "    [dry-run] git config --file $userGitConfig core.hooksPath $userHooksDir"
             Info "    [dry-run] icacls on created files -> $($user.Username)"

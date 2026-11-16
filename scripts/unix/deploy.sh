@@ -139,7 +139,7 @@ done
 MERGES_SKIPPED=0
 MACHINE_OK=0
 if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
-    if [[ ! -f "$SCRIPT_DIR/scripts/rollback/rollback.py" ]]; then
+    if [[ ! -f "$SCRIPT_DIR/scripts/rollback/rollback.py" || ! -f "$SCRIPT_DIR/lib/git_config_receipt.py" ]]; then
         error "--experimental-receipt-dir requires the source checkout with the rollback entry point"
         exit 2
     fi
@@ -460,17 +460,30 @@ install_for_user() {
 
     # Git configuration for user
     if ! $DRY_RUN; then
+        local git_receipt_failed=0
         # git config --file writes directly to target user's .gitconfig. Previously
         # "sudo -u X git config --global", which depended on HOME pointing to the
         # target user and could end up writing to root's gitconfig.
-        git config --file "$home/.gitconfig" core.hooksPath "$hooks_dir" \
-            || warn "    git config core.hooksPath: failed for $username"
+        if [[ -z "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
+            git config --file "$home/.gitconfig" core.hooksPath "$hooks_dir" \
+                || warn "    git config core.hooksPath: failed for $username"
+        fi
         mkdir -p "$template_dir/hooks"
         cp "$pre_commit" "$template_dir/hooks/pre-commit" 2>/dev/null || true
         chmod +x "$template_dir/hooks/pre-commit" 2>/dev/null || true
-        git config --file "$home/.gitconfig" init.templateDir "$template_dir" || true
-        chown "$username" "$home/.gitconfig"
+        if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
+            if ! "$PY" "$SCRIPT_DIR/lib/git_config_receipt.py" \
+                --config-path "$home/.gitconfig" --hooks-dir "$hooks_dir" \
+                --template-dir "$template_dir" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+                warn "    Git configuration receipt failed for $username"
+                git_receipt_failed=1
+            fi
+        else
+            git config --file "$home/.gitconfig" init.templateDir "$template_dir" || true
+        fi
+        if [[ -f "$home/.gitconfig" ]]; then chown "$username" "$home/.gitconfig"; fi
         chown -R "$username" "$template_dir"
+        if [[ "$git_receipt_failed" -ne 0 ]]; then return 1; fi
     else
         echo "  [dry-run] git config --global core.hooksPath $hooks_dir (as $username)"
         echo "  [dry-run] git config --global init.templateDir $template_dir (as $username)"

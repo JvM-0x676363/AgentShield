@@ -10,7 +10,7 @@ import stat
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "lib"))
-from git_config_receipt import read_key, restore_key  # noqa: E402
+from git_config_receipt import PAIR_KEYS, read_key, restore_key, restore_pair  # noqa: E402
 
 
 def read_regular(path):
@@ -46,7 +46,7 @@ def plan(receipt):
         raise ValueError("empty_receipt")
     seen, planned = set(), []
     for item in operations:
-        if not isinstance(item, dict) or item.get("kind") not in ("created_file", "appended_block", "json_added_keys", "git_config"):
+        if not isinstance(item, dict) or item.get("kind") not in ("created_file", "appended_block", "json_added_keys", "git_config", "git_config_pair"):
             raise ValueError("unsupported_operation")
         kind = item["kind"]
         dest = item.get("destination")
@@ -73,6 +73,25 @@ def plan(receipt):
             if read_key(dest, key) != installed:
                 raise ValueError("git_config_value_changed")
             planned.append((kind, dest, installed, identity, item))
+            continue
+        if kind == "git_config_pair":
+            values = item.get("values")
+            if not isinstance(values, dict) or set(values) != set(PAIR_KEYS):
+                raise ValueError("invalid_git_config_pair")
+            for key in PAIR_KEYS:
+                entry = values[key]
+                if not isinstance(entry, dict) or set(entry) != {"installed_value", "previous_value"}:
+                    raise ValueError("invalid_git_config_pair")
+                installed = entry["installed_value"]
+                previous = entry["previous_value"]
+                if (not isinstance(installed, str) or not os.path.isabs(installed) or
+                        any(char in installed for char in ("\0", "\r", "\n")) or
+                        (previous is not None and (not isinstance(previous, str) or
+                                                   any(char in previous for char in ("\0", "\r", "\n"))))):
+                    raise ValueError("invalid_git_config_pair")
+                if read_key(dest, key) != installed:
+                    raise ValueError("git_config_value_changed")
+            planned.append((kind, dest, values, identity, item))
             continue
         expected = item.get("installed_sha256")
         if not isinstance(expected, str) or len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
@@ -124,6 +143,9 @@ def main():
                 if kind == "git_config":
                     restore_key(dest, item["key"], expected, item["previous_value"], identity)
                     continue
+                if kind == "git_config_pair":
+                    restore_pair(dest, expected, identity)
+                    continue
                 current_info = os.lstat(dest)
                 if (current_info.st_dev, current_info.st_ino, current_info.st_mtime_ns) != identity:
                     raise ValueError("destination_replaced_or_reinstalled")
@@ -154,11 +176,12 @@ def main():
                     os.unlink(dest)
         status = "ready"
         if args.apply:
-            status = "restored" if planned[0][0] in ("git_config", "appended_block") else "removed"
+            status = "restored" if planned[0][0] in ("git_config", "git_config_pair", "appended_block") else "removed"
         result = {"schema_version": 1, "runner": "rollback", "status": status, "dry_run": not args.apply, "files": len(planned), "exit_code": 0}
         code = 0
     except (OSError, ValueError, TypeError, KeyError, UnicodeError, json.JSONDecodeError) as error:
-        result = {"schema_version": 1, "runner": "rollback", "status": "blocked", "reason": str(error) if isinstance(error, ValueError) else "metadata_unavailable", "exit_code": 2}
+        reason = str(error) if isinstance(error, ValueError) else "metadata_unavailable"
+        result = {"schema_version": 1, "runner": "rollback", "status": "partial" if reason == "git_config_partial_restore" else "blocked", "reason": reason, "exit_code": 2}
         code = 2
     print(json.dumps(result, separators=(",", ":")))
     return code

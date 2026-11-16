@@ -36,14 +36,14 @@ try {
     if ($metadata.schema_version -ne 1 -or $metadata.runner -ne 'agentshield-rollback' -or
         @($metadata.operations).Count -ne 1) { throw 'invalid_receipt' }
     $operation = @($metadata.operations)[0]
-    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config')) { throw 'unsupported_operation' }
+    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair')) { throw 'unsupported_operation' }
     $destination = [string]$operation.destination
     Assert-AgentShieldLocalReceiptPath -LiteralPath $destination
     if ([IO.Path]::GetFullPath($destination) -ne $destination) { throw 'invalid_destination' }
     if ($operation.kind -in @('created_file', 'appended_block')) {
         $expected = [string]$operation.installed_sha256
         if ($expected -cnotmatch '^[0-9a-f]{64}$') { throw 'invalid_digest' }
-    } else {
+    } elseif ($operation.kind -eq 'git_config') {
         if ($operation.key -notin @('core.hooksPath', 'init.templateDir') -or
             -not [string]$operation.installed_value -or
             $operation.PSObject.Properties.Name -notcontains 'previous_value') {
@@ -52,6 +52,25 @@ try {
         Assert-AgentShieldLocalReceiptPath -LiteralPath ([string]$operation.installed_value)
         if ($null -ne $operation.previous_value -and [string]$operation.previous_value -match '[\x00\r\n]') {
             throw 'invalid_git_config_operation'
+        }
+    } else {
+        $pair = $operation.values
+        $keys = @($pair.PSObject.Properties.Name)
+        if ($keys.Count -ne 2 -or
+            @($keys | Where-Object { $_ -notin @('core.hooksPath', 'init.templateDir') }).Count) {
+            throw 'invalid_git_config_pair'
+        }
+        foreach ($key in @('core.hooksPath', 'init.templateDir')) {
+            $entry = $pair.PSObject.Properties[$key].Value
+            if ($null -eq $entry -or @($entry.PSObject.Properties.Name).Count -ne 2 -or
+                $entry.PSObject.Properties.Name -notcontains 'installed_value' -or
+                $entry.PSObject.Properties.Name -notcontains 'previous_value') {
+                throw 'invalid_git_config_pair'
+            }
+            Assert-AgentShieldLocalReceiptPath -LiteralPath ([string]$entry.installed_value)
+            if ($null -ne $entry.previous_value -and [string]$entry.previous_value -match '[\x00\r\n]') {
+                throw 'invalid_git_config_pair'
+            }
         }
     }
     Assert-AgentShieldDestinationParents -Destination $destination
@@ -71,8 +90,16 @@ try {
         if ($operation.kind -eq 'appended_block') {
             Assert-AppendedContent -Operation $operation -Bytes ([IO.File]::ReadAllBytes($destination))
         }
-    } elseif ((Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $operation.key) -cne [string]$operation.installed_value) {
+    } elseif ($operation.kind -eq 'git_config' -and
+        (Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $operation.key) -cne [string]$operation.installed_value) {
         throw 'git_config_value_changed'
+    } elseif ($operation.kind -eq 'git_config_pair') {
+        foreach ($key in @('core.hooksPath', 'init.templateDir')) {
+            $entry = $operation.values.PSObject.Properties[$key].Value
+            if ((Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $key) -cne [string]$entry.installed_value) {
+                throw 'git_config_value_changed'
+            }
+        }
     }
     if ($Apply) {
         # The file may have changed after preview. Recheck immediately before
@@ -111,6 +138,25 @@ try {
                 throw 'destination_changed'
             }
             Remove-Item -LiteralPath $destination -Force -ErrorAction Stop
+        } elseif ($operation.kind -eq 'git_config_pair') {
+            try {
+                foreach ($key in @('init.templateDir', 'core.hooksPath')) {
+                    $entry = $operation.values.PSObject.Properties[$key].Value
+                    if ((Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $key) -cne [string]$entry.installed_value) {
+                        throw 'git_config_value_changed'
+                    }
+                    if ($entry.previous_value -ceq $entry.installed_value) { continue }
+                    if ($null -eq $entry.previous_value) {
+                        & git config --file $destination --unset-all $key 2>$null | Out-Null
+                    } else {
+                        & git config --file $destination $key ([string]$entry.previous_value) 2>$null | Out-Null
+                    }
+                    if ($LASTEXITCODE -ne 0 -or
+                        (Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $key) -cne $entry.previous_value) {
+                        throw 'git_config_restore_failed'
+                    }
+                }
+            } catch { throw 'git_config_partial_restore' }
         } else {
             if ((Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $operation.key) -cne [string]$operation.installed_value) {
                 throw 'git_config_value_changed'
@@ -129,7 +175,7 @@ try {
     [ordered]@{
         schema_version = 1
         runner = 'rollback'
-        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'appended_block')) { 'restored' } else { 'removed' })
+        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'git_config_pair', 'appended_block')) { 'restored' } else { 'removed' })
         dry_run = -not [bool]$Apply
         files = 1
         exit_code = 0
@@ -139,7 +185,7 @@ try {
     [ordered]@{
         schema_version = 1
         runner = 'rollback'
-        status = 'blocked'
+        status = $(if ($_.Exception.Message -eq 'git_config_partial_restore') { 'partial' } else { 'blocked' })
         reason = $(if ($_.Exception.Message -match '^[a-z_]+$') { $_.Exception.Message } else { 'metadata_unavailable' })
         exit_code = 2
     } | ConvertTo-Json -Compress

@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "rollback"))
 
 from rollback_receipt import assert_empty_private_directory, record_appended_block, record_created_file, record_json_added_keys  # noqa: E402
 from rollback import check_receipt_location, plan  # noqa: E402
-from git_config_receipt import read_key, set_with_receipt  # noqa: E402
+from git_config_receipt import read_key, set_pair_with_receipt, set_with_receipt  # noqa: E402
 
 
 @unittest.skipIf(os.name == "nt", "Unix receipt permissions required")
@@ -232,6 +232,57 @@ class CreatedFileReceiptTests(unittest.TestCase):
         ], capture_output=True, text=True, check=False)
         self.assertEqual(json.loads(refused.stdout)["status"], "blocked")
         self.assertEqual(read_key(str(config), "init.templateDir"), "/user-template")
+
+    def test_git_pair_restores_both_keys(self):
+        config = pathlib.Path(self.temp.name) / "gitconfig"
+        for key, value in (("user.name", "kept"), ("core.hooksPath", "/old-hooks")):
+            result = subprocess.run(["git", "config", "--file", str(config), key, value],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            self.assertEqual(result.returncode, 0)
+        set_pair_with_receipt(str(config), {
+            "core.hooksPath": "/new-hooks", "init.templateDir": "/new-template",
+        }, str(self.receipts))
+        receipt = next(self.receipts.glob("*.json"))
+        self.assertEqual(plan(json.loads(receipt.read_text()))[0][0], "git_config_pair")
+        restored = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt", str(receipt), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+        self.assertEqual(json.loads(restored.stdout)["status"], "restored")
+        self.assertEqual(read_key(str(config), "core.hooksPath"), "/old-hooks")
+        self.assertIsNone(read_key(str(config), "init.templateDir"))
+        self.assertEqual(subprocess.run(["git", "config", "--file", str(config), "--get", "user.name"],
+                                        capture_output=True, text=True, check=False).stdout.strip(), "kept")
+
+    def test_git_pair_conflict_preserves_both_keys(self):
+        config = pathlib.Path(self.temp.name) / "gitconfig"
+        set_pair_with_receipt(str(config), {
+            "core.hooksPath": "/new-hooks", "init.templateDir": "/new-template",
+        }, str(self.receipts))
+        receipt = next(self.receipts.glob("*.json"))
+        subprocess.run(["git", "config", "--file", str(config), "core.hooksPath", "/user-hooks"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        refused = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt", str(receipt), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(json.loads(refused.stdout)["status"], "blocked")
+        self.assertEqual(read_key(str(config), "core.hooksPath"), "/user-hooks")
+        self.assertEqual(read_key(str(config), "init.templateDir"), "/new-template")
+
+    def test_git_pair_cli_records_one_receipt(self):
+        config = pathlib.Path(self.temp.name) / "gitconfig"
+        result = subprocess.run([
+            sys.executable, str(ROOT / "lib" / "git_config_receipt.py"),
+            "--config-path", str(config), "--hooks-dir", "/new-hooks",
+            "--template-dir", "/new-template", "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "recorded")
+        receipts = list(self.receipts.glob("*.json"))
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(json.loads(receipts[0].read_text())["operations"][0]["kind"], "git_config_pair")
 
 
 if __name__ == "__main__":
