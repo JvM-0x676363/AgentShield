@@ -161,7 +161,21 @@ def preview_directory(directory):
         item = {"id": entry.name[:-5]}
         try:
             check_receipt_location(entry.path)
-            planned = plan(json.loads(read_regular(entry.path)))
+            receipt = json.loads(read_regular(entry.path))
+            operations = receipt.get("operations") if isinstance(receipt, dict) else None
+            if (isinstance(operations, list) and len(operations) == 1 and
+                    isinstance(operations[0], dict) and operations[0].get("kind") == "manual_review"):
+                operation = operations[0]
+                if (receipt.get("schema_version") != 1 or receipt.get("runner") != "agentshield-rollback" or
+                        not isinstance(operation.get("destination"), str) or
+                        not os.path.isabs(operation["destination"]) or
+                        operation.get("reason") != "existing_target_has_no_inverse"):
+                    raise ValueError("invalid_manual_review_receipt")
+                item.update(kind="manual_review", status="preview_only", reason=operation["reason"])
+                destinations.setdefault(operation["destination"], []).append(len(results))
+                results.append(item)
+                continue
+            planned = plan(receipt)
             item["kind"] = planned[0][0]
             destinations.setdefault(planned[0][1], []).append(len(results))
             if planned[0][0] == "json_added_keys":

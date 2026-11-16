@@ -37,6 +37,35 @@ def resolved_parent(path):
     return os.path.realpath(os.path.dirname(os.path.abspath(path)))
 
 
+def record_manual_review(destination, receipt_dir):
+    """Mark a changed existing target whose prior state cannot be restored."""
+    ensure_private_directory(receipt_dir)
+    if not os.path.isabs(destination):
+        raise ValueError("destination_not_absolute")
+    identifier = uuid.uuid4().hex
+    payload = {
+        "schema_version": 1,
+        "runner": "agentshield-rollback",
+        "operations": [{
+            "kind": "manual_review",
+            "destination": os.path.abspath(destination),
+            "reason": "existing_target_has_no_inverse",
+        }],
+    }
+    fd, staged = tempfile.mkstemp(prefix=".receipt-", dir=receipt_dir)
+    try:
+        os.chmod(staged, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(payload, output, separators=(",", ":"))
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(staged, os.path.join(receipt_dir, identifier + ".json"))
+    finally:
+        if os.path.exists(staged):
+            os.unlink(staged)
+    return identifier
+
+
 def record_created_file(destination, installed_content, receipt_dir):
     """Write an immutable receipt for a file that did not exist before install."""
     ensure_private_directory(receipt_dir)

@@ -28,7 +28,7 @@ import shutil
 import sys
 import time
 
-from rollback_receipt import ensure_private_directory, record_appended_block, record_created_file, record_json_added_keys
+from rollback_receipt import ensure_private_directory, record_appended_block, record_created_file, record_json_added_keys, record_manual_review
 
 RECEIPT_DIR = None
 
@@ -151,7 +151,7 @@ def read_text(path):
         return f.read()
 
 
-def write_text(path, content, dry_run):
+def write_text(path, content, dry_run, reversible_existing=False):
     """UTF-8 without BOM, LF newlines."""
     if dry_run:
         detail(f"[dry-run] would write {path} ({len(content)} bytes)")
@@ -167,6 +167,8 @@ def write_text(path, content, dry_run):
             existing = os.lstat(path)
             if not os.path.isfile(path) or existing.st_nlink != 1 or os.path.islink(path):
                 raise TargetError("unsafe destination type")
+            if not reversible_existing:
+                record_manual_review(os.path.abspath(path), RECEIPT_DIR)
     with open(path, "x" if RECEIPT_DIR and created else "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
     if RECEIPT_DIR and created:
@@ -334,7 +336,7 @@ def strat_merge_missing_keys(spec, dst, root, dry_run):
         data[k] = payload[k]
 
     content = dump_json(data)
-    write_text(dst, content, dry_run)
+    write_text(dst, content, dry_run, reversible_existing=True)
     if RECEIPT_DIR and not dry_run:
         try:
             record_json_added_keys(dst, content.encode("utf-8"), RECEIPT_DIR,
@@ -378,7 +380,7 @@ def strat_md_block(spec, dst, root, dry_run):
             prior_bytes = source.read()
         if not content.encode("utf-8").startswith(prior_bytes):
             prior_bytes = None
-    write_text(dst, content, dry_run)
+    write_text(dst, content, dry_run, reversible_existing=prior_bytes is not None)
     if prior_bytes is not None:
         try:
             record_appended_block(dst, prior_bytes, content.encode("utf-8"), RECEIPT_DIR)
@@ -420,6 +422,11 @@ def strat_remove(spec, dst, root, dry_run):
         return "absent -- nothing to remove"
     if dry_run:
         return "would remove (no longer distributed)"
+    if RECEIPT_DIR:
+        info = os.lstat(dst)
+        if os.path.islink(dst) or info.st_nlink != 1:
+            raise TargetError("unsafe destination type")
+        record_manual_review(os.path.abspath(dst), RECEIPT_DIR)
     os.remove(dst)
     return "file removed (no longer distributed)"
 

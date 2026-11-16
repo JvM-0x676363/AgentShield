@@ -31,19 +31,23 @@ if ($ReceiptDir -or -not $Receipt) {
                 if ((Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash -cne $beforeDigest) {
                     throw 'receipt_changed'
                 }
-                if ($result.status -eq 'ready' -and $LASTEXITCODE -eq 0) {
-                    $item['status'] = 'ready'
+                if ($result.status -in @('ready', 'preview_only') -and
+                    (($result.status -eq 'ready' -and $LASTEXITCODE -eq 0) -or
+                     ($result.status -eq 'preview_only' -and $LASTEXITCODE -eq 2))) {
+                    $item['status'] = [string]$result.status
                     $destination = [string]@($metadata.operations)[0].destination
                     if (-not $destinations.ContainsKey($destination)) {
                         $destinations[$destination] = [Collections.Generic.List[int]]::new()
                     }
                     $destinations[$destination].Add($items.Count)
-                    $priority = $(if ($item['kind'] -in @('git_config', 'git_config_pair')) { 0 }
-                        elseif ($item['kind'] -eq 'appended_block') { 1 } else { 2 })
-                    $prepared += [pscustomobject]@{
-                        Priority = $priority; Id = $entry.BaseName; Path = $entry.FullName
-                        Digest = $beforeDigest; Index = $items.Count
-                    }
+                    if ($result.status -eq 'ready') {
+                        $priority = $(if ($item['kind'] -in @('git_config', 'git_config_pair')) { 0 }
+                            elseif ($item['kind'] -eq 'appended_block') { 1 } else { 2 })
+                        $prepared += [pscustomobject]@{
+                            Priority = $priority; Id = $entry.BaseName; Path = $entry.FullName
+                            Digest = $beforeDigest; Index = $items.Count
+                        }
+                    } else { $item['reason'] = 'existing_target_has_no_inverse' }
                 } else {
                     $item['status'] = 'blocked'
                     $item['reason'] = $(if ([string]$result.reason -match '^[a-z_]+$') { [string]$result.reason } else { 'receipt_preview_failed' })
@@ -147,10 +151,18 @@ try {
     if ($metadata.schema_version -ne 1 -or $metadata.runner -ne 'agentshield-rollback' -or
         @($metadata.operations).Count -ne 1) { throw 'invalid_receipt' }
     $operation = @($metadata.operations)[0]
-    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair')) { throw 'unsupported_operation' }
+    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair', 'manual_review')) { throw 'unsupported_operation' }
     $destination = [string]$operation.destination
     Assert-AgentShieldLocalReceiptPath -LiteralPath $destination
     if ([IO.Path]::GetFullPath($destination) -ne $destination) { throw 'invalid_destination' }
+    if ($operation.kind -eq 'manual_review') {
+        if ($operation.reason -ne 'existing_target_has_no_inverse') { throw 'invalid_manual_review_receipt' }
+        [ordered]@{
+            schema_version = 1; runner = 'rollback'; status = 'preview_only'
+            reason = 'existing_target_has_no_inverse'; dry_run = $true; exit_code = 2
+        } | ConvertTo-Json -Compress
+        exit 2
+    }
     if ($operation.kind -in @('created_file', 'appended_block')) {
         $expected = [string]$operation.installed_sha256
         if ($expected -cnotmatch '^[0-9a-f]{64}$') { throw 'invalid_digest' }

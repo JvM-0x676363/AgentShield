@@ -109,6 +109,8 @@ try {
     $guidance = Join-Path $fixtureHome 'AGENTS.md'
     $guidancePrior = [Text.Encoding]::UTF8.GetBytes("user guidance`n")
     [IO.File]::WriteAllBytes($guidance, $guidancePrior)
+    $existingManaged = Join-Path $fixtureHome 'existing.json'
+    [IO.File]::WriteAllText($existingManaged, '{"user":"kept"}')
     $manifest = [ordered]@{
         id = 'pilot'
         label = 'Rollback synthetic target'
@@ -127,6 +129,12 @@ try {
             strategy = 'md-block'
             marker = '<!-- security-team-block -->'
             compose = @('policy/guidance.md')
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/existing.json' }
+            strategy = 'overwrite'
+            format = 'json'
+            backup = $false
+            payload = @{ managed = $true }
         })
     }
     [IO.File]::WriteAllText((Join-Path $fixtureTargets 'pilot.json'), ($manifest | ConvertTo-Json -Depth 8))
@@ -151,6 +159,14 @@ try {
         [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($guidance)) -cne "user guidance`n") {
         throw 'engine_append_rollback_failed'
     }
+    $manualReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].destination) -eq $existingManaged
+    } | Select-Object -First 1
+    if ($null -eq $manualReceipt) { throw 'engine_manual_review_receipt_missing' }
+    $manualRecord = [IO.File]::ReadAllText($manualReceipt.FullName) | ConvertFrom-Json
+    if ($manualRecord.operations[0].kind -ne 'manual_review') { throw 'engine_manual_review_kind_wrong' }
+    $manualPreview = & powershell -NoProfile -File $rollback -Receipt $manualReceipt.FullName | ConvertFrom-Json
+    if ($manualPreview.status -ne 'preview_only') { throw 'manual_review_not_preview_only' }
 
     $configPath = Join-Path $testRoot 'gitconfig'
     & git config --file $configPath user.name 'kept' | Out-Null
@@ -231,6 +247,19 @@ try {
     if ($runConflict.status -ne 'blocked' -or $runConflict.blocked -ne 1 -or
         -not (Test-Path -LiteralPath $conflictFile)) {
         throw 'batch_conflict_not_reported'
+    }
+    $manualDir = Join-Path $testRoot 'manual-receipts'
+    New-PrivateTestDirectory -Path $manualDir
+    $manualFile = Join-Path $testRoot 'manual-ready.txt'
+    [IO.File]::WriteAllBytes($manualFile, $content)
+    Write-AgentShieldCreatedReceipt -Destination $manualFile -InstalledBytes $content `
+        -ReceiptDir $manualDir | Out-Null
+    Write-AgentShieldManualReviewReceipt -Destination $existingManaged -ReceiptDir $manualDir | Out-Null
+    $manualRun = & powershell -NoProfile -File $rollback -ReceiptDir $manualDir -Apply | ConvertFrom-Json
+    if ($manualRun.status -ne 'blocked' -or $manualRun.applied -ne 0 -or
+        $manualRun.ready -ne 1 -or $manualRun.blocked -ne 1 -or
+        -not (Test-Path -LiteralPath $manualFile)) {
+        throw 'batch_manual_review_not_blocked'
     }
     $duplicateDir = Join-Path $testRoot 'duplicate-receipts'
     New-PrivateTestDirectory -Path $duplicateDir

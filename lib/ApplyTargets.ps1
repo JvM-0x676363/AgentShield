@@ -79,7 +79,8 @@ function Write-Utf8NoBom {
 }
 
 function Write-OrPreview {
-    param([string]$Path, [string]$Content, [bool]$Dry, [string]$Verbo = "would write")
+    param([string]$Path, [string]$Content, [bool]$Dry, [string]$Verbo = "would write",
+        [bool]$ReversibleExisting = $false)
     if ($Dry) {
         Detail "[dry-run] $Verbo $Path ($($Content.Length) bytes)"
         return
@@ -98,6 +99,9 @@ function Write-OrPreview {
     if ($null -ne $existing) {
         if ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw 'unsafe_destination_type'
+        }
+        if (-not $ReversibleExisting) {
+            Write-AgentShieldManualReviewReceipt -Destination $Path -ReceiptDir $ReceiptDir | Out-Null
         }
         Write-Utf8NoBom -Path $Path -Content $Content
         return
@@ -349,6 +353,13 @@ function Invoke-Remove {
         return "absent -- nothing to remove"
     }
     if ($Dry) { return "would remove (no longer distributed)" }
+    if ($ReceiptDir) {
+        $item = Get-Item -LiteralPath $Dst -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'unsafe_destination_type'
+        }
+        Write-AgentShieldManualReviewReceipt -Destination $Dst -ReceiptDir $ReceiptDir | Out-Null
+    }
     Remove-Item -LiteralPath $Dst -Force
     return "file removed (no longer distributed)"
 }
@@ -556,7 +567,8 @@ function Invoke-MdBlock {
             }
         }
     }
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry -Verbo "would append block in"
+    Write-OrPreview -Path $Dst -Content $content -Dry $Dry -Verbo "would append block in" `
+        -ReversibleExisting ($null -ne $priorBytes)
     if ($null -ne $priorBytes) {
         Write-AgentShieldAppendedBlockReceipt -Destination $Dst -PriorBytes $priorBytes `
             -InstalledBytes $candidate -ReceiptDir $ReceiptDir | Out-Null

@@ -59,6 +59,11 @@ symbolic link.
 Unix JSON key receipts remain preview-only. Their inverse needs a way to
 preserve file metadata and avoid overwriting a concurrent user edit. A run
 containing one blocks directory-wide apply before any other receipt is applied.
+In experimental receipt mode, target engines also emit a `manual_review`
+receipt before changing an existing file without a supported inverse. That
+receipt stores no prior file content and blocks directory-wide apply. An
+operator must review those changes separately; a successful batch result can
+only describe the receipts it applied.
 
 The source-checkout rollback scripts can preview one experimental run without
 changing files. Windows: `powershell -NoProfile -File scripts/windows/rollback.ps1

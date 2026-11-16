@@ -12,7 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 sys.path.insert(0, str(ROOT / "scripts" / "rollback"))
 
-from rollback_receipt import assert_empty_private_directory, record_appended_block, record_created_file, record_json_added_keys  # noqa: E402
+from rollback_receipt import assert_empty_private_directory, record_appended_block, record_created_file, record_json_added_keys, record_manual_review  # noqa: E402
 from rollback import check_receipt_location, plan  # noqa: E402
 from git_config_receipt import read_key, set_pair_with_receipt, set_with_receipt  # noqa: E402
 
@@ -145,6 +145,48 @@ class CreatedFileReceiptTests(unittest.TestCase):
                          ("blocked", 0, 1, 1))
         self.assertTrue(self.destination.exists())
         self.assertEqual(settings.read_bytes(), original)
+
+    def test_run_apply_blocks_all_when_existing_change_needs_review(self):
+        self.receipt()
+        existing = pathlib.Path(self.temp.name) / "existing.json"
+        existing.write_bytes(b'{"user":"kept"}\n')
+        record_manual_review(str(existing), str(self.receipts))
+        result = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2)
+        report = json.loads(result.stdout)
+        self.assertEqual((report["status"], report["applied"], report["ready"], report["blocked"]),
+                         ("blocked", 0, 1, 1))
+        self.assertTrue(self.destination.exists())
+        self.assertEqual(existing.read_bytes(), b'{"user":"kept"}\n')
+
+    def test_unix_engine_marks_existing_overwrite_for_manual_review(self):
+        base = pathlib.Path(self.temp.name)
+        fixture = base / "fixture"
+        (fixture / "targets").mkdir(parents=True)
+        home = base / "home"
+        home.mkdir()
+        existing = home / "existing.json"
+        existing.write_bytes(b'{"user":"kept"}\n')
+        os_key = "darwin" if sys.platform == "darwin" else "linux"
+        manifest = {
+            "id": "pilot", "label": "Rollback synthetic target", "tool": "test",
+            "scope": "user", "requires_admin": False, "selectors": ["pilot"],
+            "files": [{"dest": {os_key: "${HOME}/existing.json"}, "strategy": "overwrite",
+                       "backup": False, "payload": {"managed": True}}],
+        }
+        (fixture / "targets" / "pilot.json").write_text(json.dumps(manifest), encoding="utf-8")
+        installed = subprocess.run([
+            sys.executable, str(ROOT / "lib" / "apply_targets.py"),
+            "--root", str(fixture), "--scope", "user", "--home", str(home),
+            "--os", os_key, "--only", "pilot", "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+        receipt = next(self.receipts.glob("*.json"))
+        self.assertEqual(json.loads(receipt.read_text())["operations"][0]["kind"], "manual_review")
+        self.assertTrue(existing.exists())
 
     def test_appended_block_restores_prior_bytes(self):
         prior = b"user guidance\n"

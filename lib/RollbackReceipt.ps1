@@ -74,6 +74,23 @@ function Write-AgentShieldReceiptPayload {
     return $receipt
 }
 
+function Write-AgentShieldManualReviewReceipt {
+    param(
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][string]$ReceiptDir
+    )
+    $payload = [ordered]@{
+        schema_version = 1
+        runner = 'agentshield-rollback'
+        operations = @([ordered]@{
+            kind = 'manual_review'
+            destination = [IO.Path]::GetFullPath($Destination)
+            reason = 'existing_target_has_no_inverse'
+        })
+    }
+    return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
+}
+
 function Write-AgentShieldCreatedReceipt {
     param(
         [Parameter(Mandatory)][string]$Destination,
