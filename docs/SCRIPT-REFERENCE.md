@@ -88,6 +88,14 @@ run and reports how many receipts were already applied. Keep the receipt
 directory for operator review; this remains a partial rollback, not a complete
 uninstall.
 
+For an end-to-end Windows pilot without changing the current user profile, run
+`powershell -NoProfile -ExecutionPolicy Bypass -File tests/rollback-install-windows.ps1`
+from the source checkout. It runs the real installer with `-Only claude-code
+-SkipTools -SkipVSCode` against an isolated temporary profile, previews and
+applies only a fully ready receipt set, then checks that created files and Git
+settings were removed. Run it without Administrator privileges. It retains its
+temporary directory for inspection.
+
 `-Only` filters AI configuration only. Git hooks, scanner tools, and VS Code
 extensions remain separate layers controlled by their dedicated flags.
 

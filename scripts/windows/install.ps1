@@ -285,13 +285,26 @@ $ScannerRunner = Join-Path $ScriptDir "scripts\scan\agent_shield_scan.py"
 $ScannerRules = Join-Path $ScriptDir "rules\semgrep"
 $InstalledScannerRunner = Join-Path $HooksDir "agent-shield-scan.py"
 $InstalledScannerRules = Join-Path $HooksDir "agent-shield-rules"
+$TemplateHooksDir = Join-Path $TemplateDir "hooks"
 $createdHookFiles = @()
 $createdHookGuards = @{}
 $existingHookFiles = @()
 if ($ExperimentalReceiptDir -and -not $DryRun) {
+    foreach ($directory in @($HooksDir, $InstalledScannerRules, $TemplateDir, $TemplateHooksDir)) {
+        Assert-AgentShieldDestinationParents -Destination $directory
+        if (Test-Path -LiteralPath $directory) {
+            $existingDirectory = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+            if (-not $existingDirectory.PSIsContainer -or
+                ($existingDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'experimental_receipt_directory_unsafe'
+            }
+        } else {
+            New-Item -ItemType Directory -Path $directory -ErrorAction Stop | Out-Null
+        }
+    }
     foreach ($managedFile in @($PreCommit, $InstalledScannerRunner,
             (Join-Path $InstalledScannerRules 'agentshield-baseline.yml'),
-            (Join-Path $TemplateDir 'hooks\pre-commit'))) {
+            (Join-Path $TemplateHooksDir 'pre-commit'))) {
         Assert-AgentShieldDestinationParents -Destination $managedFile
         $existingFile = Get-Item -LiteralPath $managedFile -Force -ErrorAction SilentlyContinue
         if ($existingFile -and ($existingFile.PSIsContainer -or
@@ -315,8 +328,12 @@ Info "Configuring core.hooksPath -> $HooksDir"
 if (-not $DryRun) {
     New-Item -ItemType Directory -Force -Path $HooksDir | Out-Null
     if (-not $ExperimentalReceiptDir) { git config --global core.hooksPath $HooksDir }
+    if ($ExperimentalReceiptDir) { Assert-AgentShieldDestinationParents -Destination $InstalledScannerRunner }
     Copy-Item -LiteralPath $ScannerRunner -Destination $InstalledScannerRunner -Force
     New-Item -ItemType Directory -Force -Path $InstalledScannerRules | Out-Null
+    if ($ExperimentalReceiptDir) {
+        Assert-AgentShieldDestinationParents -Destination (Join-Path $InstalledScannerRules 'agentshield-baseline.yml')
+    }
     Copy-Item -Path (Join-Path $ScannerRules "*") -Destination $InstalledScannerRules -Recurse -Force
 } else {
     Info "  [dry-run] mkdir $HooksDir"
@@ -347,17 +364,20 @@ if ($hookIsCurrent) {
     Warn "pre-commit hook outdated -- replaced (backup in $bak)"
 } else {
     Info "Installing pre-commit hook from hooks\pre-commit (audit only)..."
+    if ($ExperimentalReceiptDir) { Assert-AgentShieldDestinationParents -Destination $PreCommit }
     Write-ShellScript -Path $PreCommit -Content $srcHookLf
     Info "  OK created at $PreCommit (audit mode: gitleaks + semgrep + trivy)"
 }
 
-$TemplateHooksDir = Join-Path $TemplateDir "hooks"
 Info "Configuring init.templateDir -> $TemplateDir"
 if (-not $DryRun) {
     New-Item -ItemType Directory -Force -Path $TemplateHooksDir | Out-Null
     Get-ChildItem -Path $TemplateHooksDir -Filter "pre-commit.bak*" -File `
         -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
     if (Test-Path $PreCommit) {
+        if ($ExperimentalReceiptDir) {
+            Assert-AgentShieldDestinationParents -Destination (Join-Path $TemplateHooksDir 'pre-commit')
+        }
         Copy-Item $PreCommit (Join-Path $TemplateHooksDir "pre-commit") -Force
     }
     if ($ExperimentalReceiptDir) {
