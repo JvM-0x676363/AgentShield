@@ -150,6 +150,7 @@ def preview_directory(directory):
     if not files or len(files) > 128:
         raise ValueError("receipt_count_invalid")
     results = []
+    destinations = {}
     for entry in files:
         if not re.fullmatch(r"[0-9a-f]{32}\.json", entry.name):
             results.append({"id": None, "status": "blocked", "reason": "invalid_receipt_entry"})
@@ -159,6 +160,7 @@ def preview_directory(directory):
             check_receipt_location(entry.path)
             planned = plan(json.loads(read_regular(entry.path)))
             item["kind"] = planned[0][0]
+            destinations.setdefault(planned[0][1], []).append(len(results))
             if planned[0][0] == "json_added_keys":
                 item.update(status="preview_only", reason="json_inverse_not_yet_available")
             else:
@@ -166,6 +168,10 @@ def preview_directory(directory):
         except (OSError, ValueError, TypeError, KeyError, UnicodeError, json.JSONDecodeError) as error:
             item.update(status="blocked", reason=str(error) if isinstance(error, ValueError) else "metadata_unavailable")
         results.append(item)
+    for indices in destinations.values():
+        if len(indices) > 1:
+            for index in indices:
+                results[index].update(status="blocked", reason="duplicate_destination")
     ready = sum(item["status"] == "ready" for item in results)
     status = "ready" if ready == len(results) else "blocked"
     code = 0 if status == "ready" else 2

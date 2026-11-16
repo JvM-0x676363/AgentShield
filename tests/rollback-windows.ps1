@@ -226,6 +226,20 @@ try {
         -not (Test-Path -LiteralPath $previewFile)) {
         throw 'batch_conflict_not_reported'
     }
+    $duplicateDir = Join-Path $testRoot 'duplicate-receipts'
+    New-PrivateTestDirectory -Path $duplicateDir
+    $duplicateFile = Join-Path $testRoot 'duplicate.txt'
+    [IO.File]::WriteAllBytes($duplicateFile, $content)
+    Write-AgentShieldCreatedReceipt -Destination $duplicateFile -InstalledBytes $content `
+        -ReceiptDir $duplicateDir | Out-Null
+    Write-AgentShieldCreatedReceipt -Destination $duplicateFile -InstalledBytes $content `
+        -ReceiptDir $duplicateDir | Out-Null
+    $duplicates = & powershell -NoProfile -File $rollback -ReceiptDir $duplicateDir | ConvertFrom-Json
+    if ($duplicates.status -ne 'blocked' -or $duplicates.ready -ne 0 -or $duplicates.blocked -ne 2 -or
+        @($duplicates.items | Where-Object { $_.reason -eq 'duplicate_destination' }).Count -ne 2 -or
+        -not (Test-Path -LiteralPath $duplicateFile)) {
+        throw 'batch_duplicate_not_rejected'
+    }
     Write-Output 'RESULT: Windows rollback synthetic checks passed'
 } finally {
     $absolute = [IO.Path]::GetFullPath($testRoot)

@@ -61,7 +61,8 @@ changing files. Windows: `powershell -NoProfile -File scripts/windows/rollback.p
 -ReceiptDir <private-dir>`. Linux/macOS: `bash scripts/unix/rollback.sh
 --receipt-dir <private-dir>`. The JSON result lists each receipt's status and
 counts conflicts, without printing destination paths. Directory-wide `Apply`
-is intentionally unavailable; apply requires an individual receipt.
+is intentionally unavailable; apply requires an individual receipt. If two
+receipts name the same destination, both are marked blocked for operator review.
 
 `-Only` filters AI configuration only. Git hooks, scanner tools, and VS Code
 extensions remain separate layers controlled by their dedicated flags.

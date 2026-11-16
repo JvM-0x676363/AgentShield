@@ -230,6 +230,19 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.assertEqual(json.loads(rejected.stdout)["reason"], "batch_apply_not_available")
         self.assertTrue(self.destination.exists())
 
+    def test_run_preview_rejects_duplicate_destination(self):
+        self.receipt()
+        record_created_file(str(self.destination), b"managed baseline\n", str(self.receipts))
+        preview = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(preview.returncode, 2)
+        report = json.loads(preview.stdout)
+        self.assertEqual((report["ready"], report["blocked"]), (0, 2))
+        self.assertTrue(all(item["reason"] == "duplicate_destination" for item in report["items"]))
+        self.assertTrue(self.destination.exists())
+
     def test_unix_engine_appended_guidance_rollback(self):
         base = pathlib.Path(self.temp.name)
         fixture = base / "fixture"

@@ -11,6 +11,7 @@ if ($ReceiptDir -or -not $Receipt) {
         $entries = @(Get-ChildItem -LiteralPath $ReceiptDir -Force -ErrorAction Stop | Sort-Object Name)
         if ($entries.Count -lt 1 -or $entries.Count -gt 128) { throw 'receipt_count_invalid' }
         $items = @()
+        $destinations = @{}
         $shell = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
         foreach ($entry in $entries) {
             if ($entry.Name -cnotmatch '^[0-9a-f]{32}\.json$') {
@@ -27,6 +28,11 @@ if ($ReceiptDir -or -not $Receipt) {
                 $result = $output[0] | ConvertFrom-Json
                 if ($result.status -eq 'ready' -and $LASTEXITCODE -eq 0) {
                     $item['status'] = 'ready'
+                    $destination = [string]@($metadata.operations)[0].destination
+                    if (-not $destinations.ContainsKey($destination)) {
+                        $destinations[$destination] = [Collections.Generic.List[int]]::new()
+                    }
+                    $destinations[$destination].Add($items.Count)
                 } else {
                     $item['status'] = 'blocked'
                     $item['reason'] = $(if ([string]$result.reason -match '^[a-z_]+$') { [string]$result.reason } else { 'receipt_preview_failed' })
@@ -36,6 +42,14 @@ if ($ReceiptDir -or -not $Receipt) {
                 $item['reason'] = $(if ($_.Exception.Message -match '^[a-z_]+$') { $_.Exception.Message } else { 'metadata_unavailable' })
             }
             $items += $item
+        }
+        foreach ($indices in $destinations.Values) {
+            if ($indices.Count -gt 1) {
+                foreach ($index in $indices) {
+                    $items[$index]['status'] = 'blocked'
+                    $items[$index]['reason'] = 'duplicate_destination'
+                }
+            }
         }
         $ready = @($items | Where-Object { $_.status -eq 'ready' }).Count
         $code = $(if ($ready -eq $items.Count) { 0 } else { 2 })
