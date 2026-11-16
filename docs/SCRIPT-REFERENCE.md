@@ -97,6 +97,14 @@ settings were removed. It also confirms that a pre-existing target file blocks
 batch rollback for manual review. Run it without Administrator privileges. It
 retains its temporary directory for inspection.
 
+On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File
+tests/rollback-managed-windows.ps1` exercises copies of the Claude and Codex
+machine manifests with destinations under a temporary directory. The copy
+disables the Administrator requirement only inside the fixture. It verifies
+created-file rollback and the manual-review block for an existing managed
+file. It does not test administrative installation into the real Program Files
+or ProgramData locations.
+
 For a non-root Linux, WSL, or macOS source-checkout pilot, run
 `bash tests/rollback-install-unix.sh`. It uses a private temporary profile and
 receipt directory, requires a fully ready preview before applying rollback,
