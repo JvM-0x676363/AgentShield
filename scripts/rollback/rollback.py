@@ -8,6 +8,7 @@ import os
 import pathlib
 import re
 import stat
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "lib"))
@@ -35,6 +36,8 @@ def check_receipt_location(path):
     receipt = os.lstat(path)
     if not stat.S_ISREG(receipt.st_mode) or receipt.st_nlink != 1:
         raise ValueError("unsafe_receipt_type")
+    if receipt.st_size > 1024 * 1024:
+        raise ValueError("receipt_too_large")
     if receipt.st_mode & 0o077:
         raise ValueError("receipt_not_private")
     if hasattr(os, "geteuid") and receipt.st_uid != os.geteuid():
@@ -180,6 +183,53 @@ def preview_directory(directory):
             "blocked": len(results) - ready, "items": results, "exit_code": code}
 
 
+def apply_directory(directory):
+    report = preview_directory(directory)
+    report.update(runner="rollback", dry_run=False, applied=0)
+    if report["status"] != "ready":
+        return report
+    priority = {"git_config_pair": 0, "git_config": 0, "appended_block": 1, "created_file": 2}
+    prepared = []
+    destinations = set()
+    for item in report["items"]:
+        path = os.path.join(directory, item["id"] + ".json")
+        check_receipt_location(path)
+        content = read_regular(path)
+        if len(content) > 1024 * 1024:
+            raise ValueError("receipt_too_large")
+        operation = plan(json.loads(content))[0]
+        if operation[1] in destinations:
+            raise ValueError("duplicate_destination")
+        destinations.add(operation[1])
+        prepared.append((priority[operation[0]], item["id"], path, sha(content)))
+    by_id = {item["id"]: item for item in report["items"]}
+    for _, identifier, path, digest in sorted(prepared):
+        try:
+            check_receipt_location(path)
+            if sha(read_regular(path)) != digest:
+                raise ValueError("receipt_changed")
+            completed = subprocess.run(
+                [sys.executable, __file__, "--receipt", path, "--apply"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                check=False, timeout=60,
+            )
+            result = json.loads(completed.stdout)
+            if completed.returncode != 0 or result.get("status") not in ("removed", "restored"):
+                raise ValueError("receipt_apply_failed")
+            by_id[identifier]["status"] = result["status"]
+            report["applied"] += 1
+            report["ready"] -= 1
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            by_id[identifier].update(status="blocked", reason="receipt_apply_failed")
+            report["ready"] -= 1
+            report["blocked"] += 1
+            report["status"] = "partial" if report["applied"] else "blocked"
+            report["exit_code"] = 2
+            return report
+    report["status"] = "restored"
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
@@ -191,9 +241,7 @@ def main():
         if os.name == "nt":
             raise ValueError("windows_native_rollback_pending")
         if args.receipt_dir:
-            if args.apply:
-                raise ValueError("batch_apply_not_available")
-            result = preview_directory(args.receipt_dir)
+            result = apply_directory(args.receipt_dir) if args.apply else preview_directory(args.receipt_dir)
             print(json.dumps(result, separators=(",", ":")))
             return result["exit_code"]
         check_receipt_location(args.receipt)

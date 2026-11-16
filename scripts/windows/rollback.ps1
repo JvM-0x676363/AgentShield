@@ -6,12 +6,12 @@ $ErrorActionPreference = 'Stop'
 if ($ReceiptDir -or -not $Receipt) {
     try {
         if ($Receipt -or -not $ReceiptDir) { throw 'receipt_source_invalid' }
-        if ($Apply) { throw 'batch_apply_not_available' }
         Assert-AgentShieldPrivateReceiptPath -LiteralPath $ReceiptDir -Directory
         $entries = @(Get-ChildItem -LiteralPath $ReceiptDir -Force -ErrorAction Stop | Sort-Object Name)
         if ($entries.Count -lt 1 -or $entries.Count -gt 128) { throw 'receipt_count_invalid' }
         $items = @()
         $destinations = @{}
+        $prepared = @()
         $shell = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
         foreach ($entry in $entries) {
             if ($entry.Name -cnotmatch '^[0-9a-f]{32}\.json$') {
@@ -21,11 +21,16 @@ if ($ReceiptDir -or -not $Receipt) {
             $item = [ordered]@{ id = $entry.BaseName }
             try {
                 Assert-AgentShieldPrivateReceiptPath -LiteralPath $entry.FullName
+                if ($entry.Length -gt 1024 * 1024) { throw 'receipt_too_large' }
+                $beforeDigest = (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash
                 $metadata = [IO.File]::ReadAllText($entry.FullName) | ConvertFrom-Json
                 $item['kind'] = [string]@($metadata.operations)[0].kind
                 $output = @(& $shell -NoProfile -File $PSCommandPath -Receipt $entry.FullName 2>$null)
                 if ($output.Count -ne 1) { throw 'receipt_preview_failed' }
                 $result = $output[0] | ConvertFrom-Json
+                if ((Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash -cne $beforeDigest) {
+                    throw 'receipt_changed'
+                }
                 if ($result.status -eq 'ready' -and $LASTEXITCODE -eq 0) {
                     $item['status'] = 'ready'
                     $destination = [string]@($metadata.operations)[0].destination
@@ -33,6 +38,12 @@ if ($ReceiptDir -or -not $Receipt) {
                         $destinations[$destination] = [Collections.Generic.List[int]]::new()
                     }
                     $destinations[$destination].Add($items.Count)
+                    $priority = $(if ($item['kind'] -in @('git_config', 'git_config_pair')) { 0 }
+                        elseif ($item['kind'] -eq 'appended_block') { 1 } else { 2 })
+                    $prepared += [pscustomobject]@{
+                        Priority = $priority; Id = $entry.BaseName; Path = $entry.FullName
+                        Digest = $beforeDigest; Index = $items.Count
+                    }
                 } else {
                     $item['status'] = 'blocked'
                     $item['reason'] = $(if ([string]$result.reason -match '^[a-z_]+$') { [string]$result.reason } else { 'receipt_preview_failed' })
@@ -52,17 +63,50 @@ if ($ReceiptDir -or -not $Receipt) {
             }
         }
         $ready = @($items | Where-Object { $_.status -eq 'ready' }).Count
+        $applied = 0
         $code = $(if ($ready -eq $items.Count) { 0 } else { 2 })
+        if ($Apply -and $code -eq 0) {
+            $currentNames = @(Get-ChildItem -LiteralPath $ReceiptDir -Force -ErrorAction Stop |
+                Sort-Object Name | ForEach-Object Name)
+            if (@(Compare-Object @($entries | ForEach-Object Name) $currentNames).Count -ne 0) {
+                throw 'receipt_directory_changed'
+            }
+            foreach ($record in @($prepared | Sort-Object Priority, Id)) {
+                try {
+                    Assert-AgentShieldPrivateReceiptPath -LiteralPath $record.Path
+                    if ((Get-FileHash -LiteralPath $record.Path -Algorithm SHA256).Hash -cne $record.Digest) {
+                        throw 'receipt_changed'
+                    }
+                    $output = @(& $shell -NoProfile -File $PSCommandPath -Receipt $record.Path -Apply 2>$null)
+                    if ($output.Count -ne 1) { throw 'receipt_apply_failed' }
+                    $result = $output[0] | ConvertFrom-Json
+                    if ($LASTEXITCODE -ne 0 -or $result.status -notin @('removed', 'restored')) {
+                        throw 'receipt_apply_failed'
+                    }
+                    $items[$record.Index]['status'] = [string]$result.status
+                    $ready--
+                    $applied++
+                } catch {
+                    $items[$record.Index]['status'] = 'blocked'
+                    $items[$record.Index]['reason'] = 'receipt_apply_failed'
+                    $ready--
+                    $code = 2
+                    break
+                }
+            }
+        }
+        $blocked = @($items | Where-Object { $_.status -eq 'blocked' -or $_.status -eq 'preview_only' }).Count
         [ordered]@{
-            schema_version = 1; runner = 'rollback-preview'
-            status = $(if ($code -eq 0) { 'ready' } else { 'blocked' })
-            dry_run = $true; receipts = $items.Count; ready = $ready
-            blocked = $items.Count - $ready; items = $items; exit_code = $code
+            schema_version = 1; runner = $(if ($Apply) { 'rollback' } else { 'rollback-preview' })
+            status = $(if ($code -eq 0) { if ($Apply) { 'restored' } else { 'ready' } }
+                elseif ($applied -gt 0) { 'partial' } else { 'blocked' })
+            dry_run = -not [bool]$Apply; receipts = $items.Count; ready = $ready
+            blocked = $blocked; applied = $applied; items = $items; exit_code = $code
         } | ConvertTo-Json -Compress -Depth 5
         exit $code
     } catch {
         [ordered]@{
-            schema_version = 1; runner = 'rollback-preview'; status = 'blocked'
+            schema_version = 1; runner = $(if ($Apply) { 'rollback' } else { 'rollback-preview' }); status = 'blocked'
             reason = $(if ($_.Exception.Message -match '^[a-z_]+$') { $_.Exception.Message } else { 'metadata_unavailable' })
             exit_code = 2
         } | ConvertTo-Json -Compress

@@ -60,9 +60,14 @@ The source-checkout rollback scripts can preview one experimental run without
 changing files. Windows: `powershell -NoProfile -File scripts/windows/rollback.ps1
 -ReceiptDir <private-dir>`. Linux/macOS: `bash scripts/unix/rollback.sh
 --receipt-dir <private-dir>`. The JSON result lists each receipt's status and
-counts conflicts, without printing destination paths. Directory-wide `Apply`
-is intentionally unavailable; apply requires an individual receipt. If two
-receipts name the same destination, both are marked blocked for operator review.
+counts conflicts, without printing destination paths. If two receipts name
+the same destination, both are marked blocked for operator review. An
+experimental `-Apply` or `--apply` against the receipt directory first requires
+all receipts to be ready, then rechecks each before applying it. Git settings
+are restored before newly created hook files are removed. A failure stops the
+run and reports how many receipts were already applied. Keep the receipt
+directory for operator review; this remains a partial rollback, not a complete
+uninstall.
 
 `-Only` filters AI configuration only. Git hooks, scanner tools, and VS Code
 extensions remain separate layers controlled by their dedicated flags.

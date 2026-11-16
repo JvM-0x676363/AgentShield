@@ -216,14 +216,20 @@ try {
         throw 'batch_preview_failed'
     }
     $batchApply = & powershell -NoProfile -File $rollback -ReceiptDir $previewDir -Apply | ConvertFrom-Json
-    if ($batchApply.status -ne 'blocked' -or $batchApply.reason -ne 'batch_apply_not_available' -or
-        -not (Test-Path -LiteralPath $previewFile)) {
-        throw 'batch_apply_not_rejected'
+    if ($batchApply.status -ne 'restored' -or $batchApply.applied -ne 1 -or
+        (Test-Path -LiteralPath $previewFile)) {
+        throw 'batch_apply_failed'
     }
-    [IO.File]::WriteAllText($previewFile, 'user edit')
-    $runConflict = & powershell -NoProfile -File $rollback -ReceiptDir $previewDir | ConvertFrom-Json
+    $conflictDir = Join-Path $testRoot 'conflict-receipts'
+    New-PrivateTestDirectory -Path $conflictDir
+    $conflictFile = Join-Path $testRoot 'conflict.txt'
+    [IO.File]::WriteAllBytes($conflictFile, $content)
+    Write-AgentShieldCreatedReceipt -Destination $conflictFile -InstalledBytes $content `
+        -ReceiptDir $conflictDir | Out-Null
+    [IO.File]::WriteAllText($conflictFile, 'user edit')
+    $runConflict = & powershell -NoProfile -File $rollback -ReceiptDir $conflictDir -Apply | ConvertFrom-Json
     if ($runConflict.status -ne 'blocked' -or $runConflict.blocked -ne 1 -or
-        -not (Test-Path -LiteralPath $previewFile)) {
+        -not (Test-Path -LiteralPath $conflictFile)) {
         throw 'batch_conflict_not_reported'
     }
     $duplicateDir = Join-Path $testRoot 'duplicate-receipts'

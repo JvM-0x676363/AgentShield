@@ -227,8 +227,25 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.assertTrue(self.destination.exists())
         self.assertTrue(second.exists())
         rejected = subprocess.run(command + ["--apply"], capture_output=True, text=True, check=False)
-        self.assertEqual(json.loads(rejected.stdout)["reason"], "batch_apply_not_available")
+        self.assertEqual(json.loads(rejected.stdout)["status"], "blocked")
         self.assertTrue(self.destination.exists())
+        self.assertTrue(second.exists())
+
+    def test_run_apply_removes_distinct_created_files(self):
+        self.receipt()
+        second = pathlib.Path(self.temp.name) / "second.txt"
+        second.write_bytes(b"second managed file\n")
+        record_created_file(str(second), b"second managed file\n", str(self.receipts))
+        applied = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        report = json.loads(applied.stdout)
+        self.assertEqual((report["status"], report["applied"], report["ready"]),
+                         ("restored", 2, 0))
+        self.assertFalse(self.destination.exists())
+        self.assertFalse(second.exists())
 
     def test_run_preview_rejects_duplicate_destination(self):
         self.receipt()
