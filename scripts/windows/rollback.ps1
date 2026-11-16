@@ -47,7 +47,7 @@ if ($ReceiptDir -or -not $Receipt) {
                             Priority = $priority; Id = $entry.BaseName; Path = $entry.FullName
                             Digest = $beforeDigest; Index = $items.Count
                         }
-                    } else { $item['reason'] = 'existing_target_has_no_inverse' }
+                    } else { $item['reason'] = [string]$result.reason }
                 } else {
                     $item['status'] = 'blocked'
                     $item['reason'] = $(if ([string]$result.reason -match '^[a-z_]+$') { [string]$result.reason } else { 'receipt_preview_failed' })
@@ -156,10 +156,12 @@ try {
     Assert-AgentShieldLocalReceiptPath -LiteralPath $destination
     if ([IO.Path]::GetFullPath($destination) -ne $destination) { throw 'invalid_destination' }
     if ($operation.kind -eq 'manual_review') {
-        if ($operation.reason -ne 'existing_target_has_no_inverse') { throw 'invalid_manual_review_receipt' }
+        if ($operation.reason -notin @('existing_target_has_no_inverse', 'receipt_incomplete')) {
+            throw 'invalid_manual_review_receipt'
+        }
         [ordered]@{
             schema_version = 1; runner = 'rollback'; status = 'preview_only'
-            reason = 'existing_target_has_no_inverse'; dry_run = $true; exit_code = 2
+            reason = [string]$operation.reason; dry_run = $true; exit_code = 2
         } | ConvertTo-Json -Compress
         exit 2
     }

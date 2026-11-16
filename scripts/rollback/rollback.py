@@ -169,7 +169,7 @@ def preview_directory(directory):
                 if (receipt.get("schema_version") != 1 or receipt.get("runner") != "agentshield-rollback" or
                         not isinstance(operation.get("destination"), str) or
                         not os.path.isabs(operation["destination"]) or
-                        operation.get("reason") != "existing_target_has_no_inverse"):
+                        operation.get("reason") not in ("existing_target_has_no_inverse", "receipt_incomplete")):
                     raise ValueError("invalid_manual_review_receipt")
                 item.update(kind="manual_review", status="preview_only", reason=operation["reason"])
                 destinations.setdefault(operation["destination"], []).append(len(results))

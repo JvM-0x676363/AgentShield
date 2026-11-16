@@ -165,6 +165,10 @@ try {
     if ($null -eq $manualReceipt) { throw 'engine_manual_review_receipt_missing' }
     $manualRecord = [IO.File]::ReadAllText($manualReceipt.FullName) | ConvertFrom-Json
     if ($manualRecord.operations[0].kind -ne 'manual_review') { throw 'engine_manual_review_kind_wrong' }
+    $orphanedGuards = @(Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].reason) -eq 'receipt_incomplete'
+    })
+    if ($orphanedGuards.Count -ne 0) { throw 'successful_engine_write_left_guard' }
     $manualPreview = & powershell -NoProfile -File $rollback -Receipt $manualReceipt.FullName | ConvertFrom-Json
     if ($manualPreview.status -ne 'preview_only') { throw 'manual_review_not_preview_only' }
 
@@ -260,6 +264,18 @@ try {
         $manualRun.ready -ne 1 -or $manualRun.blocked -ne 1 -or
         -not (Test-Path -LiteralPath $manualFile)) {
         throw 'batch_manual_review_not_blocked'
+    }
+    $interruptedDir = Join-Path $testRoot 'interrupted-receipts'
+    New-PrivateTestDirectory -Path $interruptedDir
+    $interruptedFile = Join-Path $testRoot 'interrupted.txt'
+    [IO.File]::WriteAllBytes($interruptedFile, $content)
+    Write-AgentShieldManualReviewReceipt -Destination $interruptedFile `
+        -ReceiptDir $interruptedDir -Reason 'receipt_incomplete' | Out-Null
+    $interruptedRun = & powershell -NoProfile -File $rollback -ReceiptDir $interruptedDir -Apply | ConvertFrom-Json
+    if ($interruptedRun.status -ne 'blocked' -or $interruptedRun.applied -ne 0 -or
+        $interruptedRun.items[0].reason -ne 'receipt_incomplete' -or
+        -not (Test-Path -LiteralPath $interruptedFile)) {
+        throw 'interrupted_receipt_not_blocked'
     }
     $duplicateDir = Join-Path $testRoot 'duplicate-receipts'
     New-PrivateTestDirectory -Path $duplicateDir

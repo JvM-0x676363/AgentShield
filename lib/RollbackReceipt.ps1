@@ -77,7 +77,8 @@ function Write-AgentShieldReceiptPayload {
 function Write-AgentShieldManualReviewReceipt {
     param(
         [Parameter(Mandatory)][string]$Destination,
-        [Parameter(Mandatory)][string]$ReceiptDir
+        [Parameter(Mandatory)][string]$ReceiptDir,
+        [ValidateSet('existing_target_has_no_inverse', 'receipt_incomplete')][string]$Reason = 'existing_target_has_no_inverse'
     )
     $payload = [ordered]@{
         schema_version = 1
@@ -85,7 +86,7 @@ function Write-AgentShieldManualReviewReceipt {
         operations = @([ordered]@{
             kind = 'manual_review'
             destination = [IO.Path]::GetFullPath($Destination)
-            reason = 'existing_target_has_no_inverse'
+            reason = $Reason
         })
     }
     return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir

@@ -37,11 +37,13 @@ def resolved_parent(path):
     return os.path.realpath(os.path.dirname(os.path.abspath(path)))
 
 
-def record_manual_review(destination, receipt_dir):
-    """Mark a changed existing target whose prior state cannot be restored."""
+def record_manual_review(destination, receipt_dir, reason="existing_target_has_no_inverse"):
+    """Mark a target that cannot safely participate in batch rollback."""
     ensure_private_directory(receipt_dir)
     if not os.path.isabs(destination):
         raise ValueError("destination_not_absolute")
+    if reason not in ("existing_target_has_no_inverse", "receipt_incomplete"):
+        raise ValueError("invalid_manual_review_reason")
     identifier = uuid.uuid4().hex
     payload = {
         "schema_version": 1,
@@ -49,7 +51,7 @@ def record_manual_review(destination, receipt_dir):
         "operations": [{
             "kind": "manual_review",
             "destination": os.path.abspath(destination),
-            "reason": "existing_target_has_no_inverse",
+            "reason": reason,
         }],
     }
     fd, staged = tempfile.mkstemp(prefix=".receipt-", dir=receipt_dir)

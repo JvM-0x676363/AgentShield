@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
@@ -15,6 +16,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "rollback"))
 from rollback_receipt import assert_empty_private_directory, record_appended_block, record_created_file, record_json_added_keys, record_manual_review  # noqa: E402
 from rollback import check_receipt_location, plan  # noqa: E402
 from git_config_receipt import read_key, set_pair_with_receipt, set_with_receipt  # noqa: E402
+import apply_targets as target_engine  # noqa: E402
 
 
 @unittest.skipIf(os.name == "nt", "Unix receipt permissions required")
@@ -161,6 +163,24 @@ class CreatedFileReceiptTests(unittest.TestCase):
                          ("blocked", 0, 1, 1))
         self.assertTrue(self.destination.exists())
         self.assertEqual(existing.read_bytes(), b'{"user":"kept"}\n')
+
+    def test_interrupted_created_file_keeps_provisional_receipt(self):
+        created = pathlib.Path(self.temp.name) / "new.json"
+        with mock.patch.object(target_engine, "RECEIPT_DIR", str(self.receipts)):
+            with mock.patch.object(target_engine, "record_created_file", side_effect=ValueError("simulated_failure")):
+                with self.assertRaisesRegex(target_engine.TargetError, "rollback receipt failed"):
+                    target_engine.write_text(str(created), '{"managed":true}\n', False)
+        self.assertTrue(created.exists())
+        receipt = next(self.receipts.glob("*.json"))
+        metadata = json.loads(receipt.read_text(encoding="utf-8"))
+        self.assertEqual(metadata["operations"][0]["reason"], "receipt_incomplete")
+        blocked = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(blocked.returncode, 2)
+        self.assertEqual(json.loads(blocked.stdout)["status"], "blocked")
+        self.assertTrue(created.exists())
 
     def test_unix_engine_marks_existing_overwrite_for_manual_review(self):
         base = pathlib.Path(self.temp.name)
@@ -353,6 +373,7 @@ class CreatedFileReceiptTests(unittest.TestCase):
             "--os", os_key, "--only", "pilot", "--receipt-dir", str(self.receipts),
         ], capture_output=True, text=True, check=False)
         self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+        self.assertEqual(len(list(self.receipts.glob("*.json"))), 1)
         receipt = next(self.receipts.glob("*.json"))
         self.assertEqual(json.loads(receipt.read_text())["operations"][0]["kind"], "appended_block")
         restored = subprocess.run([

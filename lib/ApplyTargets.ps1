@@ -100,18 +100,22 @@ function Write-OrPreview {
         if ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw 'unsafe_destination_type'
         }
-        if (-not $ReversibleExisting) {
-            Write-AgentShieldManualReviewReceipt -Destination $Path -ReceiptDir $ReceiptDir | Out-Null
-        }
+        $reason = $(if ($ReversibleExisting) { 'receipt_incomplete' } else { 'existing_target_has_no_inverse' })
+        $guard = Write-AgentShieldManualReviewReceipt -Destination $Path -ReceiptDir $ReceiptDir -Reason $reason
         Write-Utf8NoBom -Path $Path -Content $Content
+        if ($ReversibleExisting) { return $guard }
         return
     }
     $normalized = $Content -replace "`r`n", "`n"
     $bytes = ([System.Text.UTF8Encoding]::new($false)).GetBytes($normalized)
+    $guard = Write-AgentShieldManualReviewReceipt -Destination $Path -ReceiptDir $ReceiptDir `
+        -Reason 'receipt_incomplete'
     $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
     try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) }
     finally { $stream.Dispose() }
     Write-AgentShieldCreatedReceipt -Destination $Path -InstalledBytes $bytes -ReceiptDir $ReceiptDir | Out-Null
+    Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+    Remove-Item -LiteralPath $guard -Force
 }
 
 function Read-TextFile {
@@ -567,11 +571,13 @@ function Invoke-MdBlock {
             }
         }
     }
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry -Verbo "would append block in" `
+    $guard = Write-OrPreview -Path $Dst -Content $content -Dry $Dry -Verbo "would append block in" `
         -ReversibleExisting ($null -ne $priorBytes)
     if ($null -ne $priorBytes) {
         Write-AgentShieldAppendedBlockReceipt -Destination $Dst -PriorBytes $priorBytes `
             -InstalledBytes $candidate -ReceiptDir $ReceiptDir | Out-Null
+        Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+        Remove-Item -LiteralPath $guard -Force
     }
     return "block appended"
 }

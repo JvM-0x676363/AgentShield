@@ -158,6 +158,7 @@ def write_text(path, content, dry_run, reversible_existing=False):
         return
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     created = not os.path.lexists(path)
+    guard_id = None
     if RECEIPT_DIR:
         try:
             ensure_private_directory(RECEIPT_DIR)
@@ -167,8 +168,8 @@ def write_text(path, content, dry_run, reversible_existing=False):
             existing = os.lstat(path)
             if not os.path.isfile(path) or existing.st_nlink != 1 or os.path.islink(path):
                 raise TargetError("unsafe destination type")
-            if not reversible_existing:
-                record_manual_review(os.path.abspath(path), RECEIPT_DIR)
+        reason = "receipt_incomplete" if created or reversible_existing else "existing_target_has_no_inverse"
+        guard_id = record_manual_review(os.path.abspath(path), RECEIPT_DIR, reason)
     with open(path, "x" if RECEIPT_DIR and created else "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
     if RECEIPT_DIR and created:
@@ -176,6 +177,8 @@ def write_text(path, content, dry_run, reversible_existing=False):
             record_created_file(path, content.encode("utf-8"), RECEIPT_DIR)
         except (OSError, ValueError) as exc:
             raise TargetError(f"rollback receipt failed: {exc}") from exc
+        os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
+    return guard_id if reversible_existing and not created else None
 
 
 def dump_json(obj):
@@ -336,11 +339,12 @@ def strat_merge_missing_keys(spec, dst, root, dry_run):
         data[k] = payload[k]
 
     content = dump_json(data)
-    write_text(dst, content, dry_run, reversible_existing=True)
+    guard_id = write_text(dst, content, dry_run, reversible_existing=True)
     if RECEIPT_DIR and not dry_run:
         try:
             record_json_added_keys(dst, content.encode("utf-8"), RECEIPT_DIR,
                                    {key: payload[key] for key in added})
+            os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
         except (OSError, ValueError) as exc:
             raise TargetError(f"rollback receipt failed: {exc}") from exc
     return f"merged (+{len(added)} keys)"
@@ -380,10 +384,11 @@ def strat_md_block(spec, dst, root, dry_run):
             prior_bytes = source.read()
         if not content.encode("utf-8").startswith(prior_bytes):
             prior_bytes = None
-    write_text(dst, content, dry_run, reversible_existing=prior_bytes is not None)
+    guard_id = write_text(dst, content, dry_run, reversible_existing=prior_bytes is not None)
     if prior_bytes is not None:
         try:
             record_appended_block(dst, prior_bytes, content.encode("utf-8"), RECEIPT_DIR)
+            os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
         except (OSError, ValueError) as exc:
             raise TargetError(f"rollback receipt failed: {exc}") from exc
     return "block appended"
