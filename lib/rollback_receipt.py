@@ -277,14 +277,23 @@ def record_git_config_pair(config_path, values, receipt_dir):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--created-file", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--created-file")
+    source.add_argument("--manual-review")
     parser.add_argument("--receipt-dir", required=True)
     args = parser.parse_args()
     try:
-        if not os.path.isabs(args.created_file):
+        destination = args.created_file or args.manual_review
+        if not os.path.isabs(destination):
             raise ValueError("destination_not_absolute")
+        if args.manual_review:
+            info = os.lstat(destination)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError("unsafe_destination_type")
+            record_manual_review(destination, args.receipt_dir)
+            return 0
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(args.created_file, flags)
+        fd = os.open(destination, flags)
         try:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 1024 * 1024:
@@ -295,7 +304,7 @@ def main():
                 raise ValueError("destination_changed")
         finally:
             os.close(fd)
-        record_created_file(args.created_file, content, args.receipt_dir)
+        record_created_file(destination, content, args.receipt_dir)
     except (OSError, ValueError):
         return 1
     return 0

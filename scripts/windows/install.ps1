@@ -143,7 +143,7 @@ if ($ExperimentalReceiptDir -and -not $DryRun) {
         Err "Experimental receipt directory unavailable: $($_.Exception.Message)"
         exit 2
     }
-    Warn 'Experimental receipts cover only new target files and some appended guidance blocks; this is not a complete rollback.'
+    Warn 'Experimental rollback is partial; existing files without an inverse require manual review.'
 }
 
 # Validate selectors prior to making any changes
@@ -284,15 +284,23 @@ $ScannerRules = Join-Path $ScriptDir "rules\semgrep"
 $InstalledScannerRunner = Join-Path $HooksDir "agent-shield-scan.py"
 $InstalledScannerRules = Join-Path $HooksDir "agent-shield-rules"
 $createdHookFiles = @()
+$existingHookFiles = @()
 if ($ExperimentalReceiptDir -and -not $DryRun) {
     foreach ($managedFile in @($PreCommit, $InstalledScannerRunner,
             (Join-Path $InstalledScannerRules 'agentshield-baseline.yml'),
             (Join-Path $TemplateDir 'hooks\pre-commit'))) {
+        Assert-AgentShieldDestinationParents -Destination $managedFile
         $existingFile = Get-Item -LiteralPath $managedFile -Force -ErrorAction SilentlyContinue
-        if ($existingFile -and ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        if ($existingFile -and ($existingFile.PSIsContainer -or
+                ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
             throw 'experimental_receipt_destination_reparse_point'
         }
         if (-not $existingFile) { $createdHookFiles += $managedFile }
+        elseif ($managedFile -ne $PreCommit) { $existingHookFiles += $managedFile }
+    }
+    foreach ($managedFile in $existingHookFiles) {
+        Write-AgentShieldManualReviewReceipt -Destination $managedFile `
+            -ReceiptDir $ExperimentalReceiptDir | Out-Null
     }
 }
 
@@ -322,6 +330,10 @@ if ($hookIsCurrent) {
 } elseif ($DryRun) {
     Info "  [dry-run] Would install/update $PreCommit"
 } elseif (Test-Path $PreCommit) {
+    if ($ExperimentalReceiptDir) {
+        Write-AgentShieldManualReviewReceipt -Destination $PreCommit `
+            -ReceiptDir $ExperimentalReceiptDir | Out-Null
+    }
     $bak = "$PreCommit.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
     Copy-Item $PreCommit $bak -Force
     Write-ShellScript -Path $PreCommit -Content $srcHookLf

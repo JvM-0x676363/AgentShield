@@ -13,7 +13,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 sys.path.insert(0, str(ROOT / "scripts" / "rollback"))
 
-from rollback_receipt import assert_empty_private_directory, record_appended_block, record_created_file, record_json_added_keys, record_manual_review  # noqa: E402
+from rollback_receipt import assert_empty_private_directory, record_appended_block, record_created_file, record_json_added_keys  # noqa: E402
 from rollback import check_receipt_location, plan  # noqa: E402
 from git_config_receipt import read_key, set_pair_with_receipt, set_with_receipt  # noqa: E402
 import apply_targets as target_engine  # noqa: E402
@@ -152,7 +152,11 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.receipt()
         existing = pathlib.Path(self.temp.name) / "existing.json"
         existing.write_bytes(b'{"user":"kept"}\n')
-        record_manual_review(str(existing), str(self.receipts))
+        marked = subprocess.run([
+            sys.executable, str(ROOT / "lib" / "rollback_receipt.py"),
+            "--manual-review", str(existing), "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(marked.returncode, 0, marked.stdout + marked.stderr)
         result = subprocess.run([
             sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
             "--receipt-dir", str(self.receipts), "--apply",

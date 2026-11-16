@@ -129,7 +129,7 @@ if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
         error "--experimental-receipt-dir requires an empty private absolute directory owned by this process"
         exit 2
     fi
-    warn "Experimental receipts cover only new target files and some appended guidance blocks; this is not a complete rollback."
+    warn "Experimental rollback is partial; existing files without an inverse require manual review."
 fi
 
 RUN_ID="$(command -v uuidgen >/dev/null 2>&1 && uuidgen || printf '%s-%s' "$(date +%s)" "$$")"
@@ -462,6 +462,7 @@ PRE_COMMIT="$GIT_HOOKS_DIR/pre-commit"
 SCANNER_RUNNER="$GIT_HOOKS_DIR/agent-shield-scan.py"
 SCANNER_RULES="$GIT_HOOKS_DIR/agent-shield-rules"
 CREATED_HOOK_FILES=()
+EXISTING_HOOK_FILES=()
 if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
     for managed_file in "$PRE_COMMIT" "$SCANNER_RUNNER" \
         "$SCANNER_RULES/agentshield-baseline.yml" "$GIT_TEMPLATE/hooks/pre-commit"; do
@@ -469,7 +470,18 @@ if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
             error "Experimental receipt mode refuses a symbolic-link destination"
             exit 2
         fi
-        [[ -e "$managed_file" ]] || CREATED_HOOK_FILES+=("$managed_file")
+        if [[ -e "$managed_file" ]]; then
+            [[ "$managed_file" == "$PRE_COMMIT" ]] || EXISTING_HOOK_FILES+=("$managed_file")
+        else
+            CREATED_HOOK_FILES+=("$managed_file")
+        fi
+    done
+    for managed_file in "${EXISTING_HOOK_FILES[@]}"; do
+        if ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+            --manual-review "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+            error "Could not mark an existing hook or scanner file for manual rollback review"
+            exit 2
+        fi
     done
 fi
 
@@ -485,6 +497,13 @@ elif $DRY_RUN; then
     echo "  [dry-run] Would install/update $PRE_COMMIT"
 else
     if [[ -f "$PRE_COMMIT" ]]; then
+        if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
+            if ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                --manual-review "$PRE_COMMIT" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+                error "Could not mark the existing hook for manual rollback review"
+                exit 2
+            fi
+        fi
         # Previous version skipped ANY existing hook, leaving old hooks
         # (with 'exit 1', which BLOCKS commits) in place forever.
         PRE_COMMIT_BAK="$PRE_COMMIT.bak-$(date +%Y%m%d-%H%M%S)"

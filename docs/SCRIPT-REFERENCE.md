@@ -67,6 +67,9 @@ only describe the receipts it applied.
 For reversible writes, a provisional `receipt_incomplete` marker is written
 first and removed after the inverse receipt is saved. If the process stops
 between those steps, the marker blocks batch apply for operator review.
+In experimental mode, installers also mark pre-existing hook, scanner runner,
+Semgrep rule and Git template files before replacing them. Their prior bytes
+are not stored in receipts, so they remain manual-review items.
 
 The source-checkout rollback scripts can preview one experimental run without
 changing files. Windows: `powershell -NoProfile -File scripts/windows/rollback.ps1

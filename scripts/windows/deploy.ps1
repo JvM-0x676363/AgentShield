@@ -521,15 +521,23 @@ foreach ($user in $targetUsers) {
         $userScanRunner = Join-Path $userHooksDir "agent-shield-scan.py"
         $userScanRules = Join-Path $userHooksDir "agent-shield-rules"
         $createdHookFiles = @()
+        $existingHookFiles = @()
         if ($ExperimentalReceiptDir -and -not $DryRun) {
             foreach ($managedFile in @($userPreCommit, $userScanRunner,
                     (Join-Path $userScanRules 'agentshield-baseline.yml'),
                     (Join-Path $userTemplateDir 'hooks\pre-commit'))) {
+                Assert-AgentShieldDestinationParents -Destination $managedFile
                 $existingFile = Get-Item -LiteralPath $managedFile -Force -ErrorAction SilentlyContinue
-                if ($existingFile -and ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                if ($existingFile -and ($existingFile.PSIsContainer -or
+                        ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
                     throw 'experimental_receipt_destination_reparse_point'
                 }
                 if (-not $existingFile) { $createdHookFiles += $managedFile }
+                elseif ($managedFile -ne $userPreCommit) { $existingHookFiles += $managedFile }
+            }
+            foreach ($managedFile in $existingHookFiles) {
+                Write-AgentShieldManualReviewReceipt -Destination $managedFile `
+                    -ReceiptDir $ExperimentalReceiptDir | Out-Null
             }
         }
 
@@ -559,6 +567,10 @@ foreach ($user in $targetUsers) {
         } elseif ($DryRun) {
             Info "    [dry-run] pre-commit hook: would install/update $userPreCommit"
         } elseif (Test-Path $userPreCommit) {
+            if ($ExperimentalReceiptDir) {
+                Write-AgentShieldManualReviewReceipt -Destination $userPreCommit `
+                    -ReceiptDir $ExperimentalReceiptDir | Out-Null
+            }
             # Previous version skipped ANY existing hook, leaving old hooks
             # (with 'exit 1', which BLOCKS commits) in place.
             $bak = "$userPreCommit.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
