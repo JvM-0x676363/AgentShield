@@ -78,6 +78,14 @@ function Write-Utf8NoBom {
     [System.IO.File]::WriteAllText($Path, $normalized, $enc)
 }
 
+function Get-Sha256Hex {
+    param([Parameter(Mandatory)][string]$Path)
+    $stream = [IO.File]::OpenRead($Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose(); $stream.Dispose() }
+}
+
 function Write-OrPreview {
     param([string]$Path, [string]$Content, [bool]$Dry, [string]$Verbo = "would write",
         [bool]$ReversibleExisting = $false, [string]$KnownPriorPath,
@@ -106,10 +114,12 @@ function Write-OrPreview {
             $prior = Get-Item -LiteralPath $KnownPriorPath -Force -ErrorAction Stop
             if ($prior.PSIsContainer -or ($prior.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
                 $prior.Length -gt 1048576 -or $KnownPriorSha256 -cnotmatch '^[0-9a-f]{64}$' -or
-                (Get-FileHash -LiteralPath $KnownPriorPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $KnownPriorSha256) {
+                (Get-Sha256Hex -Path $KnownPriorPath) -cne $KnownPriorSha256) {
                 throw 'known_prior_payload_invalid'
             }
-            $knownPrior = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $KnownPriorSha256
+            if ($existing.Length -le 1048576) {
+                $knownPrior = (Get-Sha256Hex -Path $Path) -ceq $KnownPriorSha256
+            }
         }
         $priorCreation = $existing.CreationTimeUtc.Ticks
         $priorWrite = $existing.LastWriteTimeUtc.Ticks
