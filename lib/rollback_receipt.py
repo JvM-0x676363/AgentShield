@@ -270,6 +270,64 @@ def record_json_list_append(destination, installed_content, receipt_dir, parent,
     return identifier
 
 
+def record_json_mcp_added_servers(destination, installed_content, receipt_dir, parent,
+                                  added_servers, prior_content, prior_info):
+    """Record newly added MCP server names without retaining server configurations."""
+    if (not isinstance(parent, str) or not parent or
+            not isinstance(added_servers, list) or not added_servers or
+            len(added_servers) > 256 or
+            any(not isinstance(name, str) or not name for name in added_servers) or
+            len(set(added_servers)) != len(added_servers) or
+            not isinstance(prior_content, bytes) or len(prior_content) > 1024 * 1024 or
+            len(installed_content) > 1024 * 1024):
+        raise ValueError("invalid_json_mcp_inverse")
+    ensure_private_directory(receipt_dir)
+    info = os.lstat(destination)
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or
+            info.st_size != len(installed_content) or
+            info.st_dev != prior_info.st_dev or info.st_ino != prior_info.st_ino or
+            stat.S_IMODE(info.st_mode) != stat.S_IMODE(prior_info.st_mode) or
+            info.st_uid != prior_info.st_uid or info.st_gid != prior_info.st_gid):
+        raise ValueError("prior_json_state_changed")
+    with open(destination, "rb") as source:
+        if source.read(1024 * 1024 + 1) != installed_content:
+            raise ValueError("installed_content_changed")
+    identifier = uuid.uuid4().hex
+    payload = {
+        "schema_version": 1,
+        "runner": "agentshield-rollback",
+        "operations": [{
+            "kind": "json_mcp_added_servers",
+            "inverse_version": 1,
+            "destination": os.path.abspath(destination),
+            "parent_realpath": resolved_parent(destination),
+            "parent": parent,
+            "added_servers": added_servers,
+            "prior_sha256": hashlib.sha256(prior_content).hexdigest(),
+            "prior_mtime_ns": prior_info.st_mtime_ns,
+            "prior_mode": stat.S_IMODE(prior_info.st_mode),
+            "prior_uid": prior_info.st_uid,
+            "prior_gid": prior_info.st_gid,
+            "installed_sha256": hashlib.sha256(installed_content).hexdigest(),
+            "installed_device": info.st_dev,
+            "installed_inode": info.st_ino,
+            "installed_mtime_ns": info.st_mtime_ns,
+        }],
+    }
+    fd, staged = tempfile.mkstemp(prefix=".receipt-", dir=receipt_dir)
+    try:
+        os.chmod(staged, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(payload, output, separators=(",", ":"))
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(staged, os.path.join(receipt_dir, identifier + ".json"))
+    finally:
+        if os.path.exists(staged):
+            os.unlink(staged)
+    return identifier
+
+
 def record_git_config(config_path, key, installed_value, previous_value, receipt_dir):
     """Record one Git key without copying the surrounding configuration."""
     if key not in ("core.hooksPath", "init.templateDir"):

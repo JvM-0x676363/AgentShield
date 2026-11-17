@@ -42,7 +42,7 @@ if ($ReceiptDir -or -not $Receipt) {
                     $destinations[$destination].Add($items.Count)
                     if ($result.status -eq 'ready') {
                         $priority = $(if ($item['kind'] -in @('git_config', 'git_config_pair')) { 0 }
-                            elseif ($item['kind'] -in @('appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append')) { 1 } else { 2 })
+                            elseif ($item['kind'] -in @('appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append', 'json_mcp_added_servers')) { 1 } else { 2 })
                         $prepared += [pscustomobject]@{
                             Priority = $priority; Id = $entry.BaseName; Path = $entry.FullName
                             Digest = $beforeDigest; Index = $items.Count
@@ -299,6 +299,49 @@ function Get-PriorJsonListBytes {
     return ,$prior
 }
 
+function Get-PriorJsonMcpBytes {
+    param($Operation, [byte[]]$InstalledBytes)
+    $priorLength = [long]$Operation.prior_length
+    if ($Operation.inverse_version -ne 1 -or $priorLength -lt 3 -or
+        $priorLength -gt 1048576 -or $InstalledBytes.Length -gt 1048576 -or
+        [string]$Operation.prior_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        [long]$Operation.prior_creation_utc_ticks -le 0 -or
+        [long]$Operation.prior_write_utc_ticks -le 0 -or
+        -not [string]$Operation.parent) { throw 'invalid_json_mcp_inverse' }
+    $added = @($Operation.added_servers)
+    if ($added.Count -lt 1 -or $added.Count -gt 256 -or
+        @($added | Where-Object { $_ -isnot [string] -or -not $_ }).Count -ne 0) {
+        throw 'invalid_json_mcp_inverse'
+    }
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($name in $added) {
+        if (-not $seen.Add($name)) { throw 'invalid_json_mcp_inverse' }
+    }
+    try { $parsed = ([Text.UTF8Encoding]::new($false, $true)).GetString($InstalledBytes) | ConvertFrom-Json }
+    catch { throw 'invalid_installed_json' }
+    $data = ConvertTo-RollbackOrderedValue $parsed
+    if ($data -isnot [Collections.IDictionary] -or -not $data.Contains([string]$Operation.parent)) {
+        throw 'installed_servers_changed'
+    }
+    $canonical = (ConvertTo-RollbackJsonValue $data) + "`n"
+    if (-not [Collections.StructuralComparisons]::StructuralEqualityComparer.Equals(
+            ([Text.UTF8Encoding]::new($false)).GetBytes($canonical), $InstalledBytes)) {
+        throw 'invalid_installed_json'
+    }
+    $servers = $data[[string]$Operation.parent]
+    if ($servers -isnot [Collections.IDictionary]) { throw 'installed_servers_changed' }
+    foreach ($name in $added) {
+        if (-not $servers.Contains($name)) { throw 'installed_servers_changed' }
+        $servers.Remove($name)
+    }
+    $prior = ([Text.UTF8Encoding]::new($false)).GetBytes((ConvertTo-RollbackJsonValue $data) + "`n")
+    if ($prior.Length -ne $priorLength -or
+        (Get-BytesSha256 $prior) -cne [string]$Operation.prior_sha256) {
+        throw 'prior_json_cannot_be_reconstructed'
+    }
+    return ,$prior
+}
+
 try {
     $receiptPath = [IO.Path]::GetFullPath($Receipt)
     Assert-AgentShieldPrivateReceiptPath -LiteralPath (Split-Path -Parent $receiptPath) -Directory
@@ -307,7 +350,7 @@ try {
     if ($metadata.schema_version -ne 1 -or $metadata.runner -ne 'agentshield-rollback' -or
         @($metadata.operations).Count -ne 1) { throw 'invalid_receipt' }
     $operation = @($metadata.operations)[0]
-    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair', 'manual_review', 'known_prior_payload', 'json_added_keys', 'json_list_append')) { throw 'unsupported_operation' }
+    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair', 'manual_review', 'known_prior_payload', 'json_added_keys', 'json_list_append', 'json_mcp_added_servers')) { throw 'unsupported_operation' }
     $destination = [string]$operation.destination
     Assert-AgentShieldLocalReceiptPath -LiteralPath $destination
     if ([IO.Path]::GetFullPath($destination) -ne $destination) { throw 'invalid_destination' }
@@ -321,7 +364,7 @@ try {
         } | ConvertTo-Json -Compress
         exit 2
     }
-    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append')) {
+    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append', 'json_mcp_added_servers')) {
         $expected = [string]$operation.installed_sha256
         if ($expected -cnotmatch '^[0-9a-f]{64}$') { throw 'invalid_digest' }
         if ($operation.kind -eq 'json_added_keys') {
@@ -396,7 +439,7 @@ try {
         [long]$operation.installed_write_utc_ticks -ne [long]$item.LastWriteTimeUtc.Ticks) {
         throw 'destination_replaced_or_reinstalled'
     }
-    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append')) {
+    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append', 'json_mcp_added_servers')) {
         if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) {
             throw 'destination_changed'
         }
@@ -414,6 +457,9 @@ try {
         } elseif ($operation.kind -eq 'json_list_append') {
             $installedBytes = [IO.File]::ReadAllBytes($destination)
             $null = Get-PriorJsonListBytes -Operation $operation -InstalledBytes $installedBytes
+        } elseif ($operation.kind -eq 'json_mcp_added_servers') {
+            $installedBytes = [IO.File]::ReadAllBytes($destination)
+            $null = Get-PriorJsonMcpBytes -Operation $operation -InstalledBytes $installedBytes
         }
     } elseif ($operation.kind -eq 'git_config' -and
         (Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $operation.key) -cne [string]$operation.installed_value) {
@@ -473,7 +519,7 @@ try {
                     throw 'known_prior_partial_restore'
                 }
             } catch { throw 'known_prior_partial_restore' }
-        } elseif ($operation.kind -in @('json_added_keys', 'json_list_append')) {
+        } elseif ($operation.kind -in @('json_added_keys', 'json_list_append', 'json_mcp_added_servers')) {
             $stream = [IO.File]::Open($destination, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
             $writeStarted = $false
             try {
@@ -495,8 +541,10 @@ try {
                 if ((Get-BytesSha256 $bytes) -cne $expected) { throw 'destination_changed' }
                 if ($operation.kind -eq 'json_added_keys') {
                     $priorBytes = Get-PriorJsonBytes -Operation $operation -InstalledBytes $bytes
-                } else {
+                } elseif ($operation.kind -eq 'json_list_append') {
                     $priorBytes = Get-PriorJsonListBytes -Operation $operation -InstalledBytes $bytes
+                } else {
+                    $priorBytes = Get-PriorJsonMcpBytes -Operation $operation -InstalledBytes $bytes
                 }
                 $writeStarted = $true
                 $stream.Position = 0
@@ -577,7 +625,7 @@ try {
     [ordered]@{
         schema_version = 1
         runner = 'rollback'
-        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'git_config_pair', 'appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append')) { 'restored' } else { 'removed' })
+        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'git_config_pair', 'appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append', 'json_mcp_added_servers')) { 'restored' } else { 'removed' })
         dry_run = -not [bool]$Apply
         files = 1
         exit_code = 0

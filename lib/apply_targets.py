@@ -28,7 +28,7 @@ import shutil
 import sys
 import time
 
-from rollback_receipt import ensure_private_directory, record_appended_block, record_created_file, record_json_added_keys, record_json_list_append, record_manual_review
+from rollback_receipt import ensure_private_directory, record_appended_block, record_created_file, record_json_added_keys, record_json_list_append, record_json_mcp_added_servers, record_manual_review
 
 RECEIPT_DIR = None
 
@@ -346,13 +346,44 @@ def strat_merge_mcp(spec, dst, root, dry_run):
     if not isinstance(data, dict):
         raise TargetError(f"{dst}: expected top-level object")
 
-    backup(dst, dry_run)
+    prior_data = copy.deepcopy(data)
+    prior_serialized = dump_json(data)
+    prior_servers = prior_data.get(key)
+    reversible = isinstance(prior_servers, dict) and all(
+        name not in prior_servers or prior_servers[name] == value
+        for name, value in payload.items()
+    )
+    added_names = [name for name in payload if isinstance(prior_servers, dict) and name not in prior_servers]
     servers = data.setdefault(key, {})
     if not isinstance(servers, dict):
         raise TargetError(f"{dst}: '{key}' exists and is not an object")
     servers.update(payload)
 
-    write_text(dst, dump_json(data), dry_run)
+    content = dump_json(data)
+    if data == prior_data:
+        return "unchanged (servers already present)"
+    prior_content = prior_info = None
+    if RECEIPT_DIR and not dry_run and reversible and added_names:
+        prior_info = os.lstat(dst)
+        with open(dst, "rb") as source:
+            prior_content = source.read(1024 * 1024 + 1)
+        after_read = os.lstat(dst)
+        if ((prior_info.st_dev, prior_info.st_ino, prior_info.st_mtime_ns, prior_info.st_size) !=
+                (after_read.st_dev, after_read.st_ino, after_read.st_mtime_ns, after_read.st_size)):
+            raise TargetError("JSON target changed before merge")
+        if (len(prior_content) > 1024 * 1024 or len(content.encode("utf-8")) > 1024 * 1024 or
+                prior_content != prior_serialized.encode("utf-8")):
+            prior_content = prior_info = None
+    if not RECEIPT_DIR:
+        backup(dst, dry_run)
+    guard_id = write_text(dst, content, dry_run, reversible_existing=prior_content is not None)
+    if prior_content is not None:
+        try:
+            record_json_mcp_added_servers(dst, content.encode("utf-8"), RECEIPT_DIR,
+                                          key, added_names, prior_content, prior_info)
+            os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
     return f"merged ({len(payload)} servers)"
 
 

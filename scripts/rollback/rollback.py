@@ -60,6 +60,21 @@ def reconstruct_json_inverse(data, item):
             block[name] = values[:length]
         if not appended:
             raise ValueError("invalid_json_list_inverse")
+    elif kind == "json_mcp_added_servers":
+        parent = item.get("parent")
+        added = item.get("added_servers")
+        if (not isinstance(parent, str) or not parent or
+                not isinstance(added, list) or not 1 <= len(added) <= 256 or
+                any(not isinstance(name, str) or not name for name in added) or
+                len(set(added)) != len(added)):
+            raise ValueError("invalid_json_mcp_inverse")
+        block = restored.get(parent)
+        if not isinstance(block, dict) or any(name not in block for name in added):
+            raise ValueError("installed_servers_changed")
+        block = dict(block)
+        restored[parent] = block
+        for name in added:
+            del block[name]
     else:
         raise ValueError("unsupported_json_inverse")
     return restored
@@ -102,7 +117,7 @@ def plan(receipt):
         raise ValueError("empty_receipt")
     seen, planned = set(), []
     for item in operations:
-        if not isinstance(item, dict) or item.get("kind") not in ("created_file", "appended_block", "json_added_keys", "json_list_append", "git_config", "git_config_pair"):
+        if not isinstance(item, dict) or item.get("kind") not in ("created_file", "appended_block", "json_added_keys", "json_list_append", "json_mcp_added_servers", "git_config", "git_config_pair"):
             raise ValueError("unsupported_operation")
         kind = item["kind"]
         dest = item.get("destination")
@@ -167,7 +182,7 @@ def plan(receipt):
                 raise ValueError("invalid_append_metadata")
             if sha(current_bytes[:prior_length]) != prior_digest or sha(current_bytes[prior_length:]) != suffix_digest:
                 raise ValueError("append_content_changed")
-        if kind in ("json_added_keys", "json_list_append"):
+        if kind in ("json_added_keys", "json_list_append", "json_mcp_added_servers"):
             try:
                 current_json = json.loads(current_bytes)
             except (UnicodeError, json.JSONDecodeError) as exc:
@@ -198,7 +213,7 @@ def plan(receipt):
                     raise ValueError("invalid_installed_json")
                 if sha(dump_json(restored).encode("utf-8")) != prior_digest:
                     raise ValueError("prior_json_cannot_be_reconstructed")
-            elif kind == "json_list_append":
+            elif kind in ("json_list_append", "json_mcp_added_servers"):
                 raise ValueError("invalid_json_inverse")
         planned.append((kind, dest, expected, identity, item))
     return planned
@@ -300,7 +315,7 @@ def preview_directory(directory):
             planned = plan(receipt)
             item["kind"] = planned[0][0]
             destinations.setdefault(planned[0][1], []).append(len(results))
-            if planned[0][0] in ("json_added_keys", "json_list_append") and planned[0][4].get("inverse_version") != 1:
+            if planned[0][0] in ("json_added_keys", "json_list_append", "json_mcp_added_servers") and planned[0][4].get("inverse_version") != 1:
                 item.update(status="preview_only", reason="json_inverse_not_yet_available")
             else:
                 item["status"] = "ready"
@@ -325,7 +340,7 @@ def apply_directory(directory):
     if report["status"] != "ready":
         return report
     priority = {"git_config_pair": 0, "git_config": 0, "appended_block": 1,
-                "json_added_keys": 1, "json_list_append": 1, "created_file": 2}
+                "json_added_keys": 1, "json_list_append": 1, "json_mcp_added_servers": 1, "created_file": 2}
     prepared = []
     destinations = set()
     for item in report["items"]:
@@ -386,7 +401,7 @@ def main():
         check_receipt_location(args.receipt)
         planned = plan(json.loads(read_regular(args.receipt)))
         if args.apply:
-            if any(kind in ("json_added_keys", "json_list_append") and item.get("inverse_version") != 1
+            if any(kind in ("json_added_keys", "json_list_append", "json_mcp_added_servers") and item.get("inverse_version") != 1
                    for kind, _, _, _, item in planned):
                 raise ValueError("json_inverse_not_yet_available")
             # Recheck each file immediately before removal. A changed file is
@@ -425,13 +440,13 @@ def main():
                         os.fsync(fd)
                     finally:
                         os.close(fd)
-                elif kind in ("json_added_keys", "json_list_append"):
+                elif kind in ("json_added_keys", "json_list_append", "json_mcp_added_servers"):
                     restore_json_inverse(dest, expected, identity, item)
                 else:
                     os.unlink(dest)
         status = "ready"
         if args.apply:
-            status = "restored" if planned[0][0] in ("git_config", "git_config_pair", "appended_block", "json_added_keys", "json_list_append") else "removed"
+            status = "restored" if planned[0][0] in ("git_config", "git_config_pair", "appended_block", "json_added_keys", "json_list_append", "json_mcp_added_servers") else "removed"
         result = {"schema_version": 1, "runner": "rollback", "status": status, "dry_run": not args.apply, "files": len(planned), "exit_code": 0}
         code = 0
     except (OSError, ValueError, TypeError, KeyError, UnicodeError, json.JSONDecodeError) as error:

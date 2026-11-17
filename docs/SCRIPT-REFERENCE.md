@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
 | Skip scanners | `-SkipTools` | `--skip-tools` | Defers gitleaks, Semgrep, and Trivy installation. |
 | Skip VS Code | `-SkipVSCode` | `--skip-vscode` | Defers VS Code extension installation. |
 | Machine output | `-OutputMode Console|Json|Quiet` | `--output-mode Console|Json|Quiet` | `Console` is interactive; `Json` emits events; `Quiet` emits only the final JSON result. |
-| Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, newly created hook and scanner files, some appended guidance blocks, the two Git configuration keys together, one known previous Windows managed status-line payload, and canonical JSON key merges on Windows and Unix. Pre-existing hooks and scanner files are not reversible. This does not cover the full installation. Omit for normal deployment. |
+| Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, newly created hook and scanner files, some appended guidance blocks, the two Git configuration keys together, one known previous Windows managed status-line payload, and canonical JSON key, permission-list, and MCP additions on Windows and Unix. Pre-existing hooks and scanner files are not reversible. This does not cover the full installation. Omit for normal deployment. |
 | List targets | `-ListTargets` | `--list-targets` | Lists manifest targets and exits without changes. |
 
 Unix rollback receipts record the resolved parent directory. Preview and apply
@@ -79,6 +79,10 @@ the prior file hash, without copying the user's rules. Preview verifies that
 truncating only the appended entries reconstructs the exact prior file; apply
 restores its bytes and timestamp. Other existing permission-list merges remain
 manual-review items.
+On Windows and Unix, `merge-mcp` can record `json_mcp_added_servers` when it
+only adds server names to an existing canonical JSON object. The receipt stores
+those names and the prior file hash, without storing server definitions. A
+pre-existing server with a different definition remains a manual-review item.
 In experimental receipt mode, target engines also emit a `manual_review`
 receipt before changing an existing file without a supported inverse. That
 receipt stores no prior file content and blocks directory-wide apply. An

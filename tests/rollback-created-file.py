@@ -251,6 +251,47 @@ class CreatedFileReceiptTests(unittest.TestCase):
                 self.assertEqual(receipt["operations"][0]["reason"],
                                  "existing_target_has_no_inverse")
 
+    def test_canonical_mcp_merge_restores_only_new_server(self):
+        spec = {"payload": {"mcpServers": {"semgrep": {"command": "semgrep"}}}}
+        prior = target_engine.dump_json({"mcpServers": {
+            "user-server": {"command": "user-tool"}}, "user": True}).encode("utf-8")
+        self.destination.write_bytes(prior)
+        os.utime(self.destination, ns=(1_700_000_000_000_000_000,
+                                        1_700_000_000_000_000_000))
+        prior_mtime = os.lstat(self.destination).st_mtime_ns
+        with mock.patch.object(target_engine, "RECEIPT_DIR", str(self.receipts)):
+            target_engine.strat_merge_mcp(spec, str(self.destination), str(ROOT), False)
+        receipt_path = next(self.receipts.glob("*.json"))
+        receipt = json.loads(receipt_path.read_text())
+        self.assertEqual(receipt["operations"][0]["kind"], "json_mcp_added_servers")
+        self.assertEqual(receipt["operations"][0]["added_servers"], ["semgrep"])
+        self.assertNotIn("user-tool", receipt_path.read_text())
+        self.assertEqual(plan(receipt)[0][0], "json_mcp_added_servers")
+        applied = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertEqual(self.destination.read_bytes(), prior)
+        self.assertEqual(os.lstat(self.destination).st_mtime_ns, prior_mtime)
+
+    def test_mcp_inverse_requires_new_server_and_canonical_json(self):
+        spec = {"payload": {"mcpServers": {"semgrep": {"command": "semgrep"}}}}
+        for name, prior in (
+                ("overwrite", target_engine.dump_json({"mcpServers": {
+                    "semgrep": {"command": "custom"}}}).encode("utf-8")),
+                ("custom", b'{"mcpServers":{}}\n')):
+            with self.subTest(name=name):
+                destination = pathlib.Path(self.temp.name) / (name + ".json")
+                receipts = pathlib.Path(self.temp.name) / (name + "-receipts")
+                destination.write_bytes(prior)
+                with mock.patch.object(target_engine, "RECEIPT_DIR", str(receipts)):
+                    target_engine.strat_merge_mcp(spec, str(destination), str(ROOT), False)
+                receipt = json.loads(next(receipts.glob("*.json")).read_text())
+                self.assertEqual(receipt["operations"][0]["kind"], "manual_review")
+                self.assertEqual(receipt["operations"][0]["reason"],
+                                 "existing_target_has_no_inverse")
+
     def test_canonical_json_reports_partial_after_write_failure(self):
         prior, _, _, receipt_path = self.reversible_json_receipt()
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))

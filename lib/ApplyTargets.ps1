@@ -582,8 +582,20 @@ function Invoke-MergeMcp {
     if (-not $res.Ok) { return "preserved (parse failed)" }
     $data = $res.Data
 
-    Backup-File -Path $Dst -Dry $Dry
-
+    $priorCanonical = ConvertTo-JsonText $data
+    $reversible = $data.Contains($key) -and $data[$key] -is [Collections.IDictionary]
+    $addedServers = [Collections.Generic.List[string]]::new()
+    if ($reversible) {
+        $priorServers = $data[$key]
+        foreach ($name in $payload.Keys) {
+            if ($priorServers.Contains($name)) {
+                if ((ConvertTo-JsonValue $priorServers[$name]) -cne
+                    (ConvertTo-JsonValue $payload[$name])) { $reversible = $false }
+            } else {
+                $addedServers.Add([string]$name)
+            }
+        }
+    }
     if (-not $data.Contains($key)) {
         $data[$key] = New-Object System.Collections.Specialized.OrderedDictionary
     }
@@ -591,7 +603,37 @@ function Invoke-MergeMcp {
     foreach ($k in $payload.Keys) { $servers[$k] = $payload[$k] }
 
     $content = ConvertTo-JsonText $data
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry
+    if ($content -ceq $priorCanonical) { return "unchanged (servers already present)" }
+    $priorBytes = $null
+    $priorCreationTicks = $priorWriteTicks = 0
+    if ($ReceiptDir -and -not $Dry -and $reversible -and $addedServers.Count -gt 0) {
+        $priorItem = Get-Item -LiteralPath $Dst -Force -ErrorAction Stop
+        if (-not $priorItem.PSIsContainer -and
+            ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
+            $priorItem.Length -le 1048576 -and
+            ([Text.UTF8Encoding]::new($false)).GetByteCount($content) -le 1048576) {
+            $candidate = [IO.File]::ReadAllBytes($Dst)
+            $canonical = ([Text.UTF8Encoding]::new($false)).GetBytes($priorCanonical)
+            if ($candidate.Length -eq $canonical.Length -and
+                [Collections.StructuralComparisons]::StructuralEqualityComparer.Equals($candidate, $canonical)) {
+                $priorBytes = $candidate
+                $priorCreationTicks = $priorItem.CreationTimeUtc.Ticks
+                $priorWriteTicks = $priorItem.LastWriteTimeUtc.Ticks
+            }
+        }
+    }
+    if (-not $ReceiptDir) { Backup-File -Path $Dst -Dry $Dry }
+    $guard = Write-OrPreview -Path $Dst -Content $content -Dry $Dry `
+        -ReversibleExisting ($null -ne $priorBytes) -ExpectedPriorBytes $priorBytes
+    if ($null -ne $priorBytes) {
+        $installedBytes = ([Text.UTF8Encoding]::new($false)).GetBytes($content)
+        Write-AgentShieldJsonMcpReceipt -Destination $Dst -ReceiptDir $ReceiptDir `
+            -PriorBytes $priorBytes -PriorCreationTicks $priorCreationTicks `
+            -PriorWriteTicks $priorWriteTicks -InstalledBytes $installedBytes `
+            -Parent $key -AddedServers $addedServers.ToArray() | Out-Null
+        Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+        Remove-Item -LiteralPath $guard -Force
+    }
     return "merged ($($payload.Count) servers)"
 }
 

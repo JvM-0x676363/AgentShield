@@ -273,6 +273,58 @@ function Write-AgentShieldJsonListReceipt {
     return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
 }
 
+function Write-AgentShieldJsonMcpReceipt {
+    param(
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][string]$ReceiptDir,
+        [Parameter(Mandatory)][byte[]]$PriorBytes,
+        [Parameter(Mandatory)][long]$PriorCreationTicks,
+        [Parameter(Mandatory)][long]$PriorWriteTicks,
+        [Parameter(Mandatory)][byte[]]$InstalledBytes,
+        [Parameter(Mandatory)][string]$Parent,
+        [Parameter(Mandatory)][string[]]$AddedServers
+    )
+    Assert-AgentShieldPrivateReceiptPath -LiteralPath $ReceiptDir -Directory
+    if ($PriorBytes.Length -lt 3 -or $PriorBytes.Length -gt 1048576 -or
+        $InstalledBytes.Length -gt 1048576 -or -not $Parent -or
+        $AddedServers.Count -lt 1 -or $AddedServers.Count -gt 256 -or
+        @($AddedServers | Where-Object { -not $_ }).Count -ne 0 -or
+        @($AddedServers | Select-Object -Unique).Count -ne $AddedServers.Count -or
+        $PriorCreationTicks -le 0 -or $PriorWriteTicks -le 0) { throw 'invalid_json_mcp_inverse' }
+    $item = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $item.Length -ne $InstalledBytes.Length) { throw 'installed_size_changed' }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $installedHash = [BitConverter]::ToString($sha.ComputeHash($InstalledBytes)).Replace('-', '').ToLowerInvariant()
+        $priorHash = [BitConverter]::ToString($sha.ComputeHash($PriorBytes)).Replace('-', '').ToLowerInvariant()
+    } finally { $sha.Dispose() }
+    if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $installedHash -or
+        (Get-Item -LiteralPath $Destination -Force).LastWriteTimeUtc.Ticks -ne $item.LastWriteTimeUtc.Ticks) {
+        throw 'installed_content_changed'
+    }
+    $payload = [ordered]@{
+        schema_version = 1
+        runner = 'agentshield-rollback'
+        operations = @([ordered]@{
+            kind = 'json_mcp_added_servers'
+            inverse_version = 1
+            destination = [IO.Path]::GetFullPath($Destination)
+            parent = $Parent
+            added_servers = @($AddedServers)
+            prior_sha256 = $priorHash
+            prior_length = [long]$PriorBytes.Length
+            prior_creation_utc_ticks = $PriorCreationTicks
+            prior_write_utc_ticks = $PriorWriteTicks
+            installed_sha256 = $installedHash
+            installed_creation_utc_ticks = $item.CreationTimeUtc.Ticks
+            installed_write_utc_ticks = $item.LastWriteTimeUtc.Ticks
+            installed_length = [long]$item.Length
+        })
+    }
+    return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
+}
+
 function Write-AgentShieldAppendedBlockReceipt {
     param(
         [Parameter(Mandatory)][string]$Destination,

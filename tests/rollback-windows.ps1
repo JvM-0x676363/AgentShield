@@ -140,6 +140,16 @@ try {
     $permissionCustom = Join-Path $fixtureHome 'permissions-custom.json'
     $permissionCustomPrior = '{"permissions":{"allow":[],"deny":[],"defaultMode":"default"}}'
     [IO.File]::WriteAllText($permissionCustom, $permissionCustomPrior)
+    $mcpJson = Join-Path $fixtureHome 'mcp.json'
+    $mcpPrior = ([Text.UTF8Encoding]::new($false)).GetBytes((@(
+        '{', '  "mcpServers": {', '    "user-server": {',
+        '      "command": "user-tool"', '    }', '  },', '  "user": true', '}'
+    ) -join "`n") + "`n")
+    [IO.File]::WriteAllBytes($mcpJson, $mcpPrior)
+    $mcpPriorTicks = (Get-Item -LiteralPath $mcpJson).LastWriteTimeUtc.Ticks
+    $mcpOverwrite = Join-Path $fixtureHome 'mcp-overwrite.json'
+    $mcpOverwritePrior = '{"mcpServers":{"semgrep":{"command":"custom"}}}'
+    [IO.File]::WriteAllText($mcpOverwrite, $mcpOverwritePrior)
     $manifest = [ordered]@{
         id = 'pilot'
         label = 'Rollback synthetic target'
@@ -210,6 +220,18 @@ try {
             list_parent = 'permissions'
             lists = @('allow', 'deny')
             payload = @{ permissions = @{ allow = @('Read(new)'); deny = @('Bash(blocked)'); defaultMode = 'default' } }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/mcp.json' }
+            strategy = 'merge-mcp'
+            format = 'json'
+            mcp_key = 'mcpServers'
+            payload = @{ mcpServers = @{ semgrep = @{ command = 'semgrep' } } }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/mcp-overwrite.json' }
+            strategy = 'merge-mcp'
+            format = 'json'
+            mcp_key = 'mcpServers'
+            payload = @{ mcpServers = @{ semgrep = @{ command = 'semgrep' } } }
         })
     }
     [IO.File]::WriteAllText((Join-Path $fixtureTargets 'pilot.json'), ($manifest | ConvertTo-Json -Depth 8))
@@ -315,6 +337,35 @@ try {
     if ($null -eq $permissionCustomReceipt -or
         ([IO.File]::ReadAllText($permissionCustomReceipt.FullName) | ConvertFrom-Json).operations[0].kind -ne 'manual_review') {
         throw 'custom_permission_list_not_marked_for_review'
+    }
+    $mcpReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        $record = [IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json
+        $record.operations[0].destination -eq $mcpJson -and
+        $record.operations[0].kind -eq 'json_mcp_added_servers'
+    } | Select-Object -First 1
+    if ($null -eq $mcpReceipt) { throw 'mcp_receipt_missing' }
+    $mcpRecord = [IO.File]::ReadAllText($mcpReceipt.FullName) | ConvertFrom-Json
+    if (@($mcpRecord.operations[0].added_servers).Count -ne 1 -or
+        @($mcpRecord.operations[0].added_servers)[0] -cne 'semgrep' -or
+        ([IO.File]::ReadAllText($mcpReceipt.FullName)).Contains('user-tool')) {
+        throw 'mcp_receipt_invalid'
+    }
+    $mcpPreview = & powershell -NoProfile -File $rollback -Receipt $mcpReceipt.FullName | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $mcpPreview.status -ne 'ready') { throw 'mcp_preview_failed' }
+    $mcpRestored = & powershell -NoProfile -File $rollback -Receipt $mcpReceipt.FullName -Apply | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $mcpRestored.status -ne 'restored' -or
+        -not [Collections.StructuralComparisons]::StructuralEqualityComparer.Equals(
+            [IO.File]::ReadAllBytes($mcpJson), $mcpPrior) -or
+        (Get-Item -LiteralPath $mcpJson).LastWriteTimeUtc.Ticks -ne $mcpPriorTicks) {
+        throw 'mcp_restore_failed'
+    }
+    $mcpOverwriteReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        $record = [IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json
+        $record.operations[0].destination -eq $mcpOverwrite
+    } | Select-Object -First 1
+    if ($null -eq $mcpOverwriteReceipt -or
+        ([IO.File]::ReadAllText($mcpOverwriteReceipt.FullName) | ConvertFrom-Json).operations[0].kind -ne 'manual_review') {
+        throw 'mcp_overwrite_not_marked_for_review'
     }
     $managed = Join-Path $fixtureHome 'managed.json'
     if (-not (Test-Path -LiteralPath $managed)) { throw 'engine_did_not_write' }
