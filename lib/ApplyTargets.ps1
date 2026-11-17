@@ -554,16 +554,17 @@ function Invoke-MergeMissingKeys {
     if (-not $res.Ok) { return "preserved (parse failed)" }
     $data = $res.Data
 
-    Backup-File -Path $Dst -Dry $Dry
-
     $added = 0
     foreach ($k in $payload.Keys) {
         if (-not $data.Contains($k)) { $data[$k] = $payload[$k]; $added++ }
     }
 
+    if ($added -eq 0) { return "unchanged (keys already present)" }
+
+    Backup-File -Path $Dst -Dry $Dry
+
     $content = ConvertTo-JsonText $data
     Write-OrPreview -Path $Dst -Content $content -Dry $Dry
-    if ($added -eq 0) { return "unchanged (keys already present)" }
     return "merged (+$added keys)"
 }
 

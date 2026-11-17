@@ -111,6 +111,10 @@ try {
     [IO.File]::WriteAllBytes($guidance, $guidancePrior)
     $existingManaged = Join-Path $fixtureHome 'existing.json'
     [IO.File]::WriteAllText($existingManaged, '{"user":"kept"}')
+    $noOp = Join-Path $fixtureHome 'no-op.json'
+    $noOpBytes = [Text.Encoding]::UTF8.GetBytes('{"managed":true,"user":1}')
+    [IO.File]::WriteAllBytes($noOp, $noOpBytes)
+    $noOpWriteTicks = (Get-Item -LiteralPath $noOp).LastWriteTimeUtc.Ticks
     $manifest = [ordered]@{
         id = 'pilot'
         label = 'Rollback synthetic target'
@@ -135,6 +139,11 @@ try {
             format = 'json'
             backup = $false
             payload = @{ managed = $true }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/no-op.json' }
+            strategy = 'merge-missing-keys'
+            format = 'json'
+            payload = @{ managed = $true }
         })
     }
     [IO.File]::WriteAllText((Join-Path $fixtureTargets 'pilot.json'), ($manifest | ConvertTo-Json -Depth 8))
@@ -142,6 +151,15 @@ try {
         -Root $fixtureRoot -Scope user -TargetHome $fixtureHome -Only pilot `
         -ReceiptDir $receiptDir *> $null
     if ($LASTEXITCODE -ne 0) { throw 'engine_fixture_failed' }
+    if (([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($noOp))) -cne
+            ([Text.Encoding]::UTF8.GetString($noOpBytes)) -or
+        (Get-Item -LiteralPath $noOp).LastWriteTimeUtc.Ticks -ne $noOpWriteTicks -or
+        (Test-Path -LiteralPath ($noOp + '.bak')) -or
+        @(Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+            (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].destination) -eq $noOp
+        }).Count -ne 0) {
+        throw 'merge_missing_keys_noop_changed_file'
+    }
     $managed = Join-Path $fixtureHome 'managed.json'
     if (-not (Test-Path -LiteralPath $managed)) { throw 'engine_did_not_write' }
     $engineReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
