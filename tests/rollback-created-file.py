@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 sys.path.insert(0, str(ROOT / "scripts" / "rollback"))
 
 from rollback_receipt import assert_empty_private_directory, record_appended_block, record_created_file, record_json_added_keys  # noqa: E402
-from rollback import check_receipt_location, plan  # noqa: E402
+from rollback import apply_directory, check_receipt_location, plan, restore_json_added_keys  # noqa: E402
 from git_config_receipt import read_key, set_pair_with_receipt, set_with_receipt  # noqa: E402
 import apply_targets as target_engine  # noqa: E402
 
@@ -130,6 +130,96 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.destination.write_bytes(b'{"user":"kept"}\n')
         with self.assertRaisesRegex(ValueError, "destination_"):
             plan(receipt)
+
+    def reversible_json_receipt(self):
+        prior = b'{\n  "user": "kept"\n}\n'
+        installed = b'{\n  "user": "kept",\n  "managed": null\n}\n'
+        self.destination.write_bytes(prior)
+        os.utime(self.destination, ns=(1_700_000_000_000_000_000,
+                                        1_700_000_000_000_000_000))
+        prior_info = os.lstat(self.destination)
+        self.destination.write_bytes(installed)
+        record_json_added_keys(str(self.destination), installed, str(self.receipts),
+                               {"managed": None}, prior_content=prior,
+                               prior_info=prior_info)
+        receipt_path = next(self.receipts.glob("*.json"))
+        return prior, installed, prior_info, receipt_path
+
+    def test_canonical_json_key_is_restored_with_metadata(self):
+        prior, installed, prior_info, receipt_path = self.reversible_json_receipt()
+        preview = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts),
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+        self.assertEqual(json.loads(preview.stdout)["status"], "ready")
+        self.assertEqual(self.destination.read_bytes(), installed)
+        applied = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertEqual(json.loads(applied.stdout)["status"], "restored")
+        self.assertEqual(self.destination.read_bytes(), prior)
+        restored_info = os.lstat(self.destination)
+        self.assertEqual(restored_info.st_mtime_ns, prior_info.st_mtime_ns)
+        self.assertEqual(restored_info.st_mode, prior_info.st_mode)
+        self.assertEqual((restored_info.st_uid, restored_info.st_gid),
+                         (prior_info.st_uid, prior_info.st_gid))
+
+    def test_canonical_json_inverse_rejects_edits_and_metadata_drift(self):
+        prior, installed, _, receipt_path = self.reversible_json_receipt()
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        self.destination.write_bytes(installed + b" ")
+        with self.assertRaisesRegex(ValueError, "destination_"):
+            plan(receipt)
+        self.destination.write_bytes(installed)
+        receipt["operations"][0]["installed_mtime_ns"] = os.lstat(self.destination).st_mtime_ns
+        os.chmod(self.destination, 0o600 if (os.stat(self.destination).st_mode & 0o777) != 0o600 else 0o640)
+        with self.assertRaisesRegex(ValueError, "destination_metadata_changed"):
+            plan(receipt)
+
+    def test_canonical_json_inverse_rejects_unreconstructable_prior(self):
+        _, _, _, receipt_path = self.reversible_json_receipt()
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["operations"][0]["prior_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "prior_json_cannot_be_reconstructed"):
+            plan(receipt)
+
+    def test_canonical_json_reports_partial_after_write_failure(self):
+        prior, _, _, receipt_path = self.reversible_json_receipt()
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        kind, destination, expected, identity, operation = plan(receipt)[0]
+        self.assertEqual(kind, "json_added_keys")
+        with mock.patch("rollback.os.fsync", side_effect=OSError("injected")):
+            with self.assertRaisesRegex(ValueError, "json_partial_restore"):
+                restore_json_added_keys(destination, expected, identity, operation)
+        self.assertEqual(self.destination.read_bytes(), prior)
+
+    def test_batch_reports_partial_when_first_receipt_partially_restores(self):
+        self.reversible_json_receipt()
+        child_result = mock.Mock(returncode=2, stdout='{"status":"partial","exit_code":2}')
+        with mock.patch("rollback.subprocess.run", return_value=child_result):
+            report = apply_directory(str(self.receipts))
+        self.assertEqual((report["status"], report["applied"]), ("partial", 0))
+
+    def test_target_engine_records_inverse_only_for_canonical_prior_json(self):
+        spec = {"payload": {"managed": None}}
+        self.destination.write_bytes(b'{\n  "user": "kept"\n}\n')
+        with mock.patch.object(target_engine, "RECEIPT_DIR", str(self.receipts)):
+            target_engine.strat_merge_missing_keys(spec, str(self.destination), str(ROOT), False)
+        canonical_receipt = json.loads(next(self.receipts.glob("*.json")).read_text())
+        self.assertEqual(canonical_receipt["operations"][0]["inverse_version"], 1)
+        self.assertEqual(self.destination.read_bytes(),
+                         b'{\n  "user": "kept",\n  "managed": null\n}\n')
+
+        other = pathlib.Path(self.temp.name) / "custom-format.json"
+        other.write_bytes(b'{"user":"kept"}\n')
+        second_receipts = pathlib.Path(self.temp.name) / "other-receipts"
+        with mock.patch.object(target_engine, "RECEIPT_DIR", str(second_receipts)):
+            target_engine.strat_merge_missing_keys(spec, str(other), str(ROOT), False)
+        custom_receipt = json.loads(next(second_receipts.glob("*.json")).read_text())
+        self.assertNotIn("inverse_version", custom_receipt["operations"][0])
 
     def test_run_apply_blocks_all_when_json_inverse_is_preview_only(self):
         self.receipt()

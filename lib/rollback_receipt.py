@@ -154,8 +154,9 @@ def record_created_file(destination, installed_content, receipt_dir):
     return identifier
 
 
-def record_json_added_keys(destination, installed_content, receipt_dir, added_keys):
-    """Record top-level keys introduced by merge-missing-keys."""
+def record_json_added_keys(destination, installed_content, receipt_dir, added_keys,
+                           prior_content=None, prior_info=None):
+    """Record added keys; canonical prior JSON can be restored without copying it."""
     if not added_keys:
         return None
     ensure_private_directory(receipt_dir)
@@ -164,20 +165,39 @@ def record_json_added_keys(destination, installed_content, receipt_dir, added_ke
         raise ValueError("unsafe_destination_type")
     if info.st_size != len(installed_content):
         raise ValueError("installed_size_changed")
+    if (prior_content is None) != (prior_info is None):
+        raise ValueError("incomplete_prior_json_state")
+    if prior_content is not None:
+        if (not isinstance(prior_content, bytes) or len(prior_content) > 1024 * 1024 or
+                len(installed_content) > 1024 * 1024 or
+                info.st_dev != prior_info.st_dev or info.st_ino != prior_info.st_ino or
+                stat.S_IMODE(info.st_mode) != stat.S_IMODE(prior_info.st_mode) or
+                info.st_uid != prior_info.st_uid or info.st_gid != prior_info.st_gid):
+            raise ValueError("prior_json_state_changed")
     identifier = uuid.uuid4().hex
+    operation = {
+        "kind": "json_added_keys",
+        "destination": os.path.abspath(destination),
+        "parent_realpath": resolved_parent(destination),
+        "installed_sha256": hashlib.sha256(installed_content).hexdigest(),
+        "installed_device": info.st_dev,
+        "installed_inode": info.st_ino,
+        "installed_mtime_ns": info.st_mtime_ns,
+        "added_keys": added_keys,
+    }
+    if prior_content is not None:
+        operation.update({
+            "inverse_version": 1,
+            "prior_sha256": hashlib.sha256(prior_content).hexdigest(),
+            "prior_mtime_ns": prior_info.st_mtime_ns,
+            "prior_mode": stat.S_IMODE(prior_info.st_mode),
+            "prior_uid": prior_info.st_uid,
+            "prior_gid": prior_info.st_gid,
+        })
     payload = {
         "schema_version": 1,
         "runner": "agentshield-rollback",
-        "operations": [{
-            "kind": "json_added_keys",
-            "destination": os.path.abspath(destination),
-            "parent_realpath": resolved_parent(destination),
-            "installed_sha256": hashlib.sha256(installed_content).hexdigest(),
-            "installed_device": info.st_dev,
-            "installed_inode": info.st_ino,
-            "installed_mtime_ns": info.st_mtime_ns,
-            "added_keys": added_keys,
-        }],
+        "operations": [operation],
     }
     fd, staged = tempfile.mkstemp(prefix=".receipt-", dir=receipt_dir)
     try:

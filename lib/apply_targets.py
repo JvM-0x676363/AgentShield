@@ -333,6 +333,17 @@ def strat_merge_missing_keys(spec, dst, root, dry_run):
     added = [k for k in payload if k not in data]
     if not added:
         return "unchanged (keys already present)"
+    prior_content = prior_info = None
+    if RECEIPT_DIR and not dry_run:
+        prior_info = os.lstat(dst)
+        with open(dst, "rb") as source:
+            prior_content = source.read(1024 * 1024 + 1)
+        after_read = os.lstat(dst)
+        if ((prior_info.st_dev, prior_info.st_ino, prior_info.st_mtime_ns, prior_info.st_size) !=
+                (after_read.st_dev, after_read.st_ino, after_read.st_mtime_ns, after_read.st_size)):
+            raise TargetError("JSON target changed before merge")
+        if len(prior_content) > 1024 * 1024 or prior_content != dump_json(data).encode("utf-8"):
+            prior_content = prior_info = None
     if not RECEIPT_DIR:
         backup(dst, dry_run)
     for k in added:
@@ -343,7 +354,8 @@ def strat_merge_missing_keys(spec, dst, root, dry_run):
     if RECEIPT_DIR and not dry_run:
         try:
             record_json_added_keys(dst, content.encode("utf-8"), RECEIPT_DIR,
-                                   {key: payload[key] for key in added})
+                                   {key: payload[key] for key in added},
+                                   prior_content=prior_content, prior_info=prior_info)
             os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
         except (OSError, ValueError) as exc:
             raise TargetError(f"rollback receipt failed: {exc}") from exc

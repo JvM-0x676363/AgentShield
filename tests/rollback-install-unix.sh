@@ -103,6 +103,55 @@ for key in core.hooksPath init.templateDir; do
     fi
 done
 
+settings="$test_home/.config/Code/User/settings.json"
+mkdir -p "$(dirname "$settings")"
+printf '{\n  "user.setting": true\n}\n' > "$settings"
+cp "$settings" "$test_root/prior-settings.json"
+prior_mtime="$(python3 -c 'import os, sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$settings")"
+json_receipts="$test_root/json-receipts"
+mkdir -m 0700 "$json_receipts"
+if ! json_install="$(bash "$repo/scripts/unix/install.sh" \
+    --only vscode --skip-tools --skip-vscode \
+    --experimental-receipt-dir "$json_receipts" 2>&1)"; then
+    printf '%s\n' "$json_install" | tail -n 12 >&2
+    printf 'Evidence directory: %s\n' "$test_root" >&2
+    exit 1
+fi
+if [[ "$json_install" != *'INSTALL DONE failed=0'* ]]; then
+    echo 'Isolated VS Code JSON merge did not report success.' >&2
+    exit 1
+fi
+if ! json_preview="$(python3 "$repo/scripts/rollback/rollback.py" --receipt-dir "$json_receipts")"; then
+    echo 'Canonical JSON rollback preview was blocked.' >&2
+    printf '%s\n' "$json_preview" >&2
+    exit 1
+fi
+printf '%s\n' "$json_preview" | python3 -c '
+import json, sys
+result = json.load(sys.stdin)
+items = result.get("items", [])
+if result.get("status") != "ready" or not any(
+        item.get("kind") == "json_added_keys" and item.get("status") == "ready"
+        for item in items):
+    sys.exit(1)
+' || { echo 'Canonical JSON receipt was not ready.' >&2; exit 1; }
+if ! json_result="$(python3 "$repo/scripts/rollback/rollback.py" --receipt-dir "$json_receipts" --apply)"; then
+    echo 'Canonical JSON rollback apply failed.' >&2
+    printf '%s\n' "$json_result" >&2
+    exit 1
+fi
+printf '%s\n' "$json_result" | python3 -c '
+import json, sys
+result = json.load(sys.stdin)
+if result.get("status") != "restored" or result.get("applied") != result.get("receipts"):
+    sys.exit(1)
+' || { echo 'Canonical JSON batch rollback was incomplete.' >&2; exit 1; }
+if ! cmp -s "$settings" "$test_root/prior-settings.json" ||
+   [[ "$(python3 -c 'import os, sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$settings")" != "$prior_mtime" ]]; then
+    echo 'Canonical JSON file or timestamp was not restored.' >&2
+    exit 1
+fi
+
 existing_file="$test_home/.claude/vendor-claude-code.md"
 printf 'pre-existing user file\n' > "$existing_file"
 manual_receipt_dir="$test_root/manual-receipts"
@@ -155,5 +204,6 @@ if ! cmp -s "$existing_file" "$test_root/installed-existing.txt" ||
 fi
 
 printf 'RESULT: Unix isolated install and rollback passed (receipts=%s)\n' "$receipt_count"
+echo 'RESULT: Unix canonical VS Code JSON merge and rollback passed'
 echo 'RESULT: Unix existing-file review blocked batch rollback'
 printf 'Evidence directory: %s\n' "$test_root"

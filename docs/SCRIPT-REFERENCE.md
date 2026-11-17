@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
 | Skip scanners | `-SkipTools` | `--skip-tools` | Defers gitleaks, Semgrep, and Trivy installation. |
 | Skip VS Code | `-SkipVSCode` | `--skip-vscode` | Defers VS Code extension installation. |
 | Machine output | `-OutputMode Console|Json|Quiet` | `--output-mode Console|Json|Quiet` | `Console` is interactive; `Json` emits events; `Quiet` emits only the final JSON result. |
-| Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, newly created hook and scanner files, some appended guidance blocks, the two Git configuration keys together, and one known previous Windows managed status-line payload. Unix JSON key records are preview-only. Pre-existing hooks and scanner files are not reversible. This does not cover the full installation. Omit for normal deployment. |
+| Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, newly created hook and scanner files, some appended guidance blocks, the two Git configuration keys together, one known previous Windows managed status-line payload, and canonical Unix JSON key merges. Pre-existing hooks and scanner files are not reversible. This does not cover the full installation. Omit for normal deployment. |
 | List targets | `-ListTargets` | `--list-targets` | Lists manifest targets and exits without changes. |
 
 Unix rollback receipts record the resolved parent directory. Preview and apply
@@ -56,9 +56,14 @@ reject a destination redirected through a changed symbolic link. Older pilot
 receipts without this field are accepted only when the parent path has no
 symbolic link.
 
-Unix JSON key receipts remain preview-only. Their inverse needs a way to
-preserve file metadata and avoid overwriting a concurrent user edit. A run
-containing one blocks directory-wide apply before any other receipt is applied.
+New Unix JSON key receipts are reversible only when the pre-install file uses
+the engine's canonical JSON serialization. The receipt stores prior hash,
+timestamp, mode, owner and group, without copying the prior content. Preview
+reconstructs the prior JSON by removing only the keys the installer added and
+verifies its hash. Apply rechecks the installed file's hash, identity and
+metadata under an open file descriptor before writing and restores the prior
+timestamp. Legacy receipts and files with custom JSON formatting remain
+preview-only; a run containing one blocks directory-wide apply.
 In experimental receipt mode, target engines also emit a `manual_review`
 receipt before changing an existing file without a supported inverse. That
 receipt stores no prior file content and blocks directory-wide apply. An
@@ -126,7 +131,8 @@ locations.
 For a non-root Linux, WSL, or macOS source-checkout pilot, run
 `bash tests/rollback-install-unix.sh`. It uses a private temporary profile and
 receipt directory, requires a fully ready preview before applying rollback,
-checks that created files and Git settings were removed, and confirms that a
+checks that created files and Git settings were removed, verifies restoration
+of a canonical VS Code JSON file and its timestamp, and confirms that a
 pre-existing target file blocks batch rollback. It retains the temporary
 directory for inspection.
 
