@@ -170,6 +170,54 @@ function Write-AgentShieldKnownPriorReceipt {
     return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
 }
 
+function Write-AgentShieldJsonKeyReceipt {
+    param(
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][string]$ReceiptDir,
+        [Parameter(Mandatory)][byte[]]$PriorBytes,
+        [Parameter(Mandatory)][long]$PriorCreationTicks,
+        [Parameter(Mandatory)][long]$PriorWriteTicks,
+        [Parameter(Mandatory)][byte[]]$InstalledBytes,
+        [Parameter(Mandatory)][string[]]$AddedKeys
+    )
+    Assert-AgentShieldPrivateReceiptPath -LiteralPath $ReceiptDir -Directory
+    if ($PriorBytes.Length -lt 3 -or $PriorBytes.Length -gt 1048576 -or
+        $InstalledBytes.Length -gt 1048576 -or $AddedKeys.Count -lt 1 -or
+        $AddedKeys.Count -gt 256 -or $PriorCreationTicks -le 0 -or
+        $PriorWriteTicks -le 0) { throw 'invalid_json_inverse' }
+    $item = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $item.Length -ne $InstalledBytes.Length) { throw 'installed_size_changed' }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $installedHash = [BitConverter]::ToString($sha.ComputeHash($InstalledBytes)).Replace('-', '').ToLowerInvariant()
+        $priorHash = [BitConverter]::ToString($sha.ComputeHash($PriorBytes)).Replace('-', '').ToLowerInvariant()
+    } finally { $sha.Dispose() }
+    if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $installedHash -or
+        (Get-Item -LiteralPath $Destination -Force).LastWriteTimeUtc.Ticks -ne $item.LastWriteTimeUtc.Ticks) {
+        throw 'installed_content_changed'
+    }
+    $payload = [ordered]@{
+        schema_version = 1
+        runner = 'agentshield-rollback'
+        operations = @([ordered]@{
+            kind = 'json_added_keys'
+            inverse_version = 1
+            destination = [IO.Path]::GetFullPath($Destination)
+            prior_sha256 = $priorHash
+            prior_length = [long]$PriorBytes.Length
+            prior_creation_utc_ticks = $PriorCreationTicks
+            prior_write_utc_ticks = $PriorWriteTicks
+            installed_sha256 = $installedHash
+            installed_creation_utc_ticks = $item.CreationTimeUtc.Ticks
+            installed_write_utc_ticks = $item.LastWriteTimeUtc.Ticks
+            installed_length = [long]$item.Length
+            added_keys = @($AddedKeys)
+        })
+    }
+    return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
+}
+
 function Write-AgentShieldAppendedBlockReceipt {
     param(
         [Parameter(Mandatory)][string]$Destination,

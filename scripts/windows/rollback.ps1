@@ -42,7 +42,7 @@ if ($ReceiptDir -or -not $Receipt) {
                     $destinations[$destination].Add($items.Count)
                     if ($result.status -eq 'ready') {
                         $priority = $(if ($item['kind'] -in @('git_config', 'git_config_pair')) { 0 }
-                            elseif ($item['kind'] -in @('appended_block', 'known_prior_payload')) { 1 } else { 2 })
+                            elseif ($item['kind'] -in @('appended_block', 'known_prior_payload', 'json_added_keys')) { 1 } else { 2 })
                         $prepared += [pscustomobject]@{
                             Priority = $priority; Id = $entry.BaseName; Path = $entry.FullName
                             Digest = $beforeDigest; Index = $items.Count
@@ -146,6 +146,32 @@ function Assert-AppendedContent {
     }
 }
 
+function Get-PriorJsonBytes {
+    param($Operation, [byte[]]$InstalledBytes)
+    $length = [long]$Operation.prior_length
+    if ($Operation.inverse_version -ne 1 -or $length -lt 3 -or
+        $length -gt 1048576 -or $InstalledBytes.Length -gt 1048576 -or
+        $length -ge $InstalledBytes.Length -or
+        [string]$Operation.prior_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        [long]$Operation.prior_creation_utc_ticks -le 0 -or
+        [long]$Operation.prior_write_utc_ticks -le 0) {
+        throw 'invalid_json_inverse'
+    }
+    if ($length -eq 3) {
+        $prior = [Text.Encoding]::UTF8.GetBytes("{}`n")
+    } else {
+        $prior = [byte[]]::new([int]$length)
+        [Array]::Copy($InstalledBytes, 0, $prior, 0, [int]($length - 3))
+        $prior[$length - 3] = 10
+        $prior[$length - 2] = 125
+        $prior[$length - 1] = 10
+    }
+    if ((Get-BytesSha256 $prior) -cne [string]$Operation.prior_sha256) {
+        throw 'prior_json_cannot_be_reconstructed'
+    }
+    return ,$prior
+}
+
 try {
     $receiptPath = [IO.Path]::GetFullPath($Receipt)
     Assert-AgentShieldPrivateReceiptPath -LiteralPath (Split-Path -Parent $receiptPath) -Directory
@@ -154,7 +180,7 @@ try {
     if ($metadata.schema_version -ne 1 -or $metadata.runner -ne 'agentshield-rollback' -or
         @($metadata.operations).Count -ne 1) { throw 'invalid_receipt' }
     $operation = @($metadata.operations)[0]
-    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair', 'manual_review', 'known_prior_payload')) { throw 'unsupported_operation' }
+    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair', 'manual_review', 'known_prior_payload', 'json_added_keys')) { throw 'unsupported_operation' }
     $destination = [string]$operation.destination
     Assert-AgentShieldLocalReceiptPath -LiteralPath $destination
     if ([IO.Path]::GetFullPath($destination) -ne $destination) { throw 'invalid_destination' }
@@ -168,9 +194,15 @@ try {
         } | ConvertTo-Json -Compress
         exit 2
     }
-    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload')) {
+    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys')) {
         $expected = [string]$operation.installed_sha256
         if ($expected -cnotmatch '^[0-9a-f]{64}$') { throw 'invalid_digest' }
+        if ($operation.kind -eq 'json_added_keys') {
+            if (@($operation.added_keys).Count -lt 1 -or @($operation.added_keys).Count -gt 256 -or
+                @($operation.added_keys | Where-Object { $_ -isnot [string] }).Count -ne 0) {
+                throw 'invalid_added_keys'
+            }
+        }
         if ($operation.kind -eq 'known_prior_payload') {
             $managedDestination = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'ClaudeCode\statusline-security.py'
             if ($Apply -and $destination -ieq $managedDestination) {
@@ -237,12 +269,21 @@ try {
         [long]$operation.installed_write_utc_ticks -ne [long]$item.LastWriteTimeUtc.Ticks) {
         throw 'destination_replaced_or_reinstalled'
     }
-    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload')) {
+    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys')) {
         if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) {
             throw 'destination_changed'
         }
         if ($operation.kind -eq 'appended_block') {
             Assert-AppendedContent -Operation $operation -Bytes ([IO.File]::ReadAllBytes($destination))
+        } elseif ($operation.kind -eq 'json_added_keys') {
+            $installedBytes = [IO.File]::ReadAllBytes($destination)
+            $null = Get-PriorJsonBytes -Operation $operation -InstalledBytes $installedBytes
+            try { $parsed = ([Text.UTF8Encoding]::new($false, $true)).GetString($installedBytes) | ConvertFrom-Json }
+            catch { throw 'invalid_installed_json' }
+            if ($parsed -isnot [pscustomobject] -or
+                @($operation.added_keys | Where-Object { $parsed.PSObject.Properties.Name -cnotcontains $_ }).Count) {
+                throw 'installed_keys_changed'
+            }
         }
     } elseif ($operation.kind -eq 'git_config' -and
         (Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $operation.key) -cne [string]$operation.installed_value) {
@@ -302,6 +343,42 @@ try {
                     throw 'known_prior_partial_restore'
                 }
             } catch { throw 'known_prior_partial_restore' }
+        } elseif ($operation.kind -eq 'json_added_keys') {
+            $stream = [IO.File]::Open($destination, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            $writeStarted = $false
+            try {
+                $locked = Get-Item -LiteralPath $destination -Force -ErrorAction Stop
+                if ($locked.PSIsContainer -or ($locked.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                    $locked.Length -ne [long]$operation.installed_length -or
+                    $locked.CreationTimeUtc.Ticks -ne [long]$operation.installed_creation_utc_ticks -or
+                    $locked.LastWriteTimeUtc.Ticks -ne [long]$operation.installed_write_utc_ticks -or
+                    $stream.Length -gt 1048576) {
+                    throw 'destination_changed'
+                }
+                $bytes = [byte[]]::new([int]$stream.Length)
+                $offset = 0
+                while ($offset -lt $bytes.Length) {
+                    $count = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+                    if ($count -le 0) { throw 'destination_changed' }
+                    $offset += $count
+                }
+                if ((Get-BytesSha256 $bytes) -cne $expected) { throw 'destination_changed' }
+                $priorBytes = Get-PriorJsonBytes -Operation $operation -InstalledBytes $bytes
+                $writeStarted = $true
+                $stream.Position = 0
+                $stream.SetLength(0)
+                $stream.Write($priorBytes, 0, $priorBytes.Length)
+                $stream.Flush($true)
+            } catch {
+                if ($writeStarted) { throw 'json_partial_restore' }
+                throw
+            } finally { $stream.Dispose() }
+            try {
+                [IO.File]::SetCreationTimeUtc($destination, [DateTime]::new([long]$operation.prior_creation_utc_ticks, [DateTimeKind]::Utc))
+                [IO.File]::SetLastWriteTimeUtc($destination, [DateTime]::new([long]$operation.prior_write_utc_ticks, [DateTimeKind]::Utc))
+                if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                    [string]$operation.prior_sha256) { throw 'json_partial_restore' }
+            } catch { throw 'json_partial_restore' }
         } elseif ($operation.kind -eq 'appended_block') {
             $stream = [IO.File]::Open($destination, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
             try {
@@ -366,7 +443,7 @@ try {
     [ordered]@{
         schema_version = 1
         runner = 'rollback'
-        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'git_config_pair', 'appended_block', 'known_prior_payload')) { 'restored' } else { 'removed' })
+        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'git_config_pair', 'appended_block', 'known_prior_payload', 'json_added_keys')) { 'restored' } else { 'removed' })
         dry_run = -not [bool]$Apply
         files = 1
         exit_code = 0
@@ -376,7 +453,7 @@ try {
     [ordered]@{
         schema_version = 1
         runner = 'rollback'
-        status = $(if ($_.Exception.Message -in @('git_config_partial_restore', 'known_prior_partial_restore')) { 'partial' } else { 'blocked' })
+        status = $(if ($_.Exception.Message -in @('git_config_partial_restore', 'known_prior_partial_restore', 'json_partial_restore')) { 'partial' } else { 'blocked' })
         reason = $(if ($_.Exception.Message -match '^[a-z_]+$') { $_.Exception.Message } else { 'metadata_unavailable' })
         exit_code = 2
     } | ConvertTo-Json -Compress

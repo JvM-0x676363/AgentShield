@@ -92,6 +92,42 @@ try {
             throw 'git_config_survived_rollback'
         }
     }
+    $settings = Join-Path $env:APPDATA 'Code\User\settings.json'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $settings) -Force | Out-Null
+    $settingsPrior = [Text.Encoding]::UTF8.GetBytes("{`n  `"user.setting`": true`n}`n")
+    [IO.File]::WriteAllBytes($settings, $settingsPrior)
+    $settingsPriorTicks = (Get-Item -LiteralPath $settings).LastWriteTimeUtc.Ticks
+    $jsonReceiptDir = Join-Path $testRoot 'json-receipts'
+    New-PrivateReceiptDirectory -Path $jsonReceiptDir
+    $ErrorActionPreference = 'Continue'
+    try {
+        $jsonInstallOutput = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $install `
+            -Only vscode -SkipTools -SkipVSCode -ExperimentalReceiptDir $jsonReceiptDir 2>&1)
+        $jsonInstallExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = 'Stop'
+    }
+    if ($jsonInstallExit -ne 0 -or
+        -not @($jsonInstallOutput | Select-String 'INSTALL DONE failed=0').Count) {
+        $jsonInstallOutput | Select-Object -Last 8 | ForEach-Object { Write-Warning $_ }
+        throw 'isolated_json_install_failed'
+    }
+    $jsonPreview = & powershell -NoProfile -File $rollback -ReceiptDir $jsonReceiptDir | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $jsonPreview.status -ne 'ready' -or
+        -not @($jsonPreview.items | Where-Object {
+            $_.kind -eq 'json_added_keys' -and $_.status -eq 'ready'
+        }).Count) {
+        throw 'isolated_json_preview_not_ready'
+    }
+    $jsonResult = & powershell -NoProfile -File $rollback -ReceiptDir $jsonReceiptDir -Apply | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $jsonResult.status -ne 'restored' -or
+        $jsonResult.applied -ne $jsonPreview.receipts -or
+        [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($settings)) -cne
+            [Text.Encoding]::UTF8.GetString($settingsPrior) -or
+        (Get-Item -LiteralPath $settings).LastWriteTimeUtc.Ticks -ne $settingsPriorTicks -or
+        (Test-Path -LiteralPath ($settings + '.bak'))) {
+        throw 'isolated_json_rollback_failed'
+    }
     $existingFile = Join-Path $testHome '.claude\vendor-claude-code.md'
     [IO.File]::WriteAllText($existingFile, 'pre-existing user file')
     $manualReceiptDir = Join-Path $testRoot 'manual-receipts'
@@ -121,6 +157,7 @@ try {
         throw 'existing_file_batch_was_applied'
     }
     Write-Host "RESULT: Windows isolated install and rollback passed (receipts=$($preview.receipts))"
+    Write-Host 'RESULT: Windows canonical VS Code JSON merge and rollback passed'
     Write-Host 'RESULT: Windows existing-file review blocked batch rollback'
     Write-Host "Evidence directory: $testRoot"
 } finally {

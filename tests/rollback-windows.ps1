@@ -115,6 +115,18 @@ try {
     $noOpBytes = [Text.Encoding]::UTF8.GetBytes('{"managed":true,"user":1}')
     [IO.File]::WriteAllBytes($noOp, $noOpBytes)
     $noOpWriteTicks = (Get-Item -LiteralPath $noOp).LastWriteTimeUtc.Ticks
+    $canonicalJson = Join-Path $fixtureHome 'canonical.json'
+    $canonicalPrior = [Text.Encoding]::UTF8.GetBytes("{`n  `"user`": true`n}`n")
+    [IO.File]::WriteAllBytes($canonicalJson, $canonicalPrior)
+    $canonicalPriorTicks = (Get-Item -LiteralPath $canonicalJson).LastWriteTimeUtc.Ticks
+    $emptyJson = Join-Path $fixtureHome 'empty.json'
+    $emptyPrior = [Text.Encoding]::UTF8.GetBytes("{}`n")
+    [IO.File]::WriteAllBytes($emptyJson, $emptyPrior)
+    $conflictJson = Join-Path $fixtureHome 'conflict-json.json'
+    [IO.File]::WriteAllBytes($conflictJson, $canonicalPrior)
+    $customJson = Join-Path $fixtureHome 'custom.json'
+    $customPrior = '{"user":true}'
+    [IO.File]::WriteAllText($customJson, $customPrior)
     $manifest = [ordered]@{
         id = 'pilot'
         label = 'Rollback synthetic target'
@@ -144,6 +156,26 @@ try {
             strategy = 'merge-missing-keys'
             format = 'json'
             payload = @{ managed = $true }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/canonical.json' }
+            strategy = 'merge-missing-keys'
+            format = 'json'
+            payload = @{ managed = $true }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/empty.json' }
+            strategy = 'merge-missing-keys'
+            format = 'json'
+            payload = @{ managed = $true }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/conflict-json.json' }
+            strategy = 'merge-missing-keys'
+            format = 'json'
+            payload = @{ managed = $true }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/custom.json' }
+            strategy = 'merge-missing-keys'
+            format = 'json'
+            payload = @{ managed = $true }
         })
     }
     [IO.File]::WriteAllText((Join-Path $fixtureTargets 'pilot.json'), ($manifest | ConvertTo-Json -Depth 8))
@@ -159,6 +191,52 @@ try {
             (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].destination) -eq $noOp
         }).Count -ne 0) {
         throw 'merge_missing_keys_noop_changed_file'
+    }
+    $canonicalReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].destination) -eq $canonicalJson -and
+        (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].kind) -eq 'json_added_keys'
+    } | Select-Object -First 1
+    if ($null -eq $canonicalReceipt) { throw 'canonical_json_receipt_missing' }
+    $canonicalPreview = & powershell -NoProfile -File $rollback -Receipt $canonicalReceipt.FullName | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $canonicalPreview.status -ne 'ready') {
+        throw 'canonical_json_preview_failed'
+    }
+    $canonicalRestored = & powershell -NoProfile -File $rollback -Receipt $canonicalReceipt.FullName -Apply | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $canonicalRestored.status -ne 'restored' -or
+        [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($canonicalJson)) -cne
+            [Text.Encoding]::UTF8.GetString($canonicalPrior) -or
+        (Get-Item -LiteralPath $canonicalJson).LastWriteTimeUtc.Ticks -ne $canonicalPriorTicks) {
+        throw 'canonical_json_restore_failed'
+    }
+    $emptyReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].destination) -eq $emptyJson -and
+        (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].kind) -eq 'json_added_keys'
+    } | Select-Object -First 1
+    if ($null -eq $emptyReceipt) { throw 'empty_json_receipt_missing' }
+    $emptyRestored = & powershell -NoProfile -File $rollback -Receipt $emptyReceipt.FullName -Apply | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $emptyRestored.status -ne 'restored' -or
+        [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($emptyJson)) -cne
+            [Text.Encoding]::UTF8.GetString($emptyPrior)) {
+        throw 'empty_json_restore_failed'
+    }
+    $conflictReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].destination) -eq $conflictJson -and
+        (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].kind) -eq 'json_added_keys'
+    } | Select-Object -First 1
+    if ($null -eq $conflictReceipt) { throw 'conflict_json_receipt_missing' }
+    [IO.File]::AppendAllText($conflictJson, ' ')
+    $conflictContent = [IO.File]::ReadAllText($conflictJson)
+    $conflictPreview = & powershell -NoProfile -File $rollback -Receipt $conflictReceipt.FullName | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 2 -or $conflictPreview.status -ne 'blocked' -or
+        [IO.File]::ReadAllText($conflictJson) -cne $conflictContent) {
+        throw 'changed_json_was_not_blocked'
+    }
+    $customReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        (([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).operations[0].destination) -eq $customJson
+    } | Select-Object -First 1
+    if ($null -ne $customReceipt -or [IO.File]::ReadAllText($customJson) -cne $customPrior -or
+        (Test-Path -LiteralPath ($customJson + '.bak'))) {
+        throw 'custom_json_was_modified'
     }
     $managed = Join-Path $fixtureHome 'managed.json'
     if (-not (Test-Path -LiteralPath $managed)) { throw 'engine_did_not_write' }
