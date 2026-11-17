@@ -72,6 +72,13 @@ prior bytes and timestamps, and reports a partial failure if restoration fails
 after writing begins. In experimental receipt mode, Windows preserves an
 existing JSON file that is noncanonical or exceeds the 1 MiB receipt limit;
 that file receives no inverse receipt because no change was made.
+On Windows and Unix, an existing canonical Claude permissions JSON can receive a
+`json_list_append` receipt when every affected list already exists and the
+merge changes no other field. The receipt keeps each list's prior length and
+the prior file hash, without copying the user's rules. Preview verifies that
+truncating only the appended entries reconstructs the exact prior file; apply
+restores its bytes and timestamp. Other existing permission-list merges remain
+manual-review items.
 In experimental receipt mode, target engines also emit a `manual_review`
 receipt before changing an existing file without a supported inverse. That
 receipt stores no prior file content and blocks directory-wide apply. An

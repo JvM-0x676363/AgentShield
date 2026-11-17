@@ -27,6 +27,44 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def reconstruct_json_inverse(data, item):
+    kind = item["kind"]
+    restored = dict(data)
+    if kind == "json_added_keys":
+        added_keys = item.get("added_keys")
+        if (not isinstance(added_keys, dict) or not added_keys or
+                any(not isinstance(key, str) or key not in restored or restored[key] != value
+                    for key, value in added_keys.items())):
+            raise ValueError("installed_keys_changed")
+        for key in added_keys:
+            del restored[key]
+    elif kind == "json_list_append":
+        parent = item.get("parent")
+        lengths = item.get("prior_lengths")
+        if (not isinstance(parent, str) or not parent or
+                not isinstance(lengths, dict) or not lengths or
+                any(not isinstance(name, str) or not name or type(length) is not int or length < 0
+                    for name, length in lengths.items())):
+            raise ValueError("invalid_json_list_inverse")
+        block = restored.get(parent)
+        if not isinstance(block, dict):
+            raise ValueError("installed_lists_changed")
+        block = dict(block)
+        restored[parent] = block
+        appended = False
+        for name, length in lengths.items():
+            values = block.get(name)
+            if not isinstance(values, list) or length > len(values):
+                raise ValueError("installed_lists_changed")
+            appended |= length < len(values)
+            block[name] = values[:length]
+        if not appended:
+            raise ValueError("invalid_json_list_inverse")
+    else:
+        raise ValueError("unsupported_json_inverse")
+    return restored
+
+
 def check_receipt_location(path):
     directory = os.path.dirname(os.path.abspath(path))
     info = os.lstat(directory)
@@ -64,7 +102,7 @@ def plan(receipt):
         raise ValueError("empty_receipt")
     seen, planned = set(), []
     for item in operations:
-        if not isinstance(item, dict) or item.get("kind") not in ("created_file", "appended_block", "json_added_keys", "git_config", "git_config_pair"):
+        if not isinstance(item, dict) or item.get("kind") not in ("created_file", "appended_block", "json_added_keys", "json_list_append", "git_config", "git_config_pair"):
             raise ValueError("unsupported_operation")
         kind = item["kind"]
         dest = item.get("destination")
@@ -129,16 +167,14 @@ def plan(receipt):
                 raise ValueError("invalid_append_metadata")
             if sha(current_bytes[:prior_length]) != prior_digest or sha(current_bytes[prior_length:]) != suffix_digest:
                 raise ValueError("append_content_changed")
-        added_keys = item.get("added_keys")
-        if kind == "json_added_keys":
-            if not isinstance(added_keys, dict) or not added_keys or any(not isinstance(key, str) for key in added_keys):
-                raise ValueError("invalid_added_keys")
+        if kind in ("json_added_keys", "json_list_append"):
             try:
                 current_json = json.loads(current_bytes)
             except (UnicodeError, json.JSONDecodeError) as exc:
                 raise ValueError("invalid_installed_json") from exc
-            if not isinstance(current_json, dict) or any(key not in current_json or current_json[key] != value for key, value in added_keys.items()):
-                raise ValueError("installed_keys_changed")
+            if not isinstance(current_json, dict):
+                raise ValueError("invalid_installed_json")
+            restored = reconstruct_json_inverse(current_json, item)
             if "inverse_version" in item:
                 if os.utime not in os.supports_fd:
                     raise ValueError("fd_utime_not_supported")
@@ -158,17 +194,18 @@ def plan(receipt):
                 if (stat.S_IMODE(current_info.st_mode) != prior_mode or
                         current_info.st_uid != prior_uid or current_info.st_gid != prior_gid):
                     raise ValueError("destination_metadata_changed")
-                restored = dict(current_json)
-                for key in added_keys:
-                    del restored[key]
+                if current_bytes != dump_json(current_json).encode("utf-8"):
+                    raise ValueError("invalid_installed_json")
                 if sha(dump_json(restored).encode("utf-8")) != prior_digest:
                     raise ValueError("prior_json_cannot_be_reconstructed")
+            elif kind == "json_list_append":
+                raise ValueError("invalid_json_inverse")
         planned.append((kind, dest, expected, identity, item))
     return planned
 
 
-def restore_json_added_keys(dest, expected, identity, item):
-    """Remove only keys recorded by a canonical JSON merge, in the same inode."""
+def restore_json_inverse(dest, expected, identity, item):
+    """Reverse a canonical JSON merge in the same inode."""
     if os.utime not in os.supports_fd:
         raise ValueError("fd_utime_not_supported")
     flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
@@ -192,11 +229,7 @@ def restore_json_added_keys(dest, expected, identity, item):
             raise ValueError("invalid_installed_json") from exc
         if not isinstance(data, dict) or content != dump_json(data).encode("utf-8"):
             raise ValueError("invalid_installed_json")
-        for key, value in item["added_keys"].items():
-            if key not in data or data[key] != value:
-                raise ValueError("installed_keys_changed")
-            del data[key]
-        prior_bytes = dump_json(data).encode("utf-8")
+        prior_bytes = dump_json(reconstruct_json_inverse(data, item)).encode("utf-8")
         if sha(prior_bytes) != item["prior_sha256"]:
             raise ValueError("prior_json_cannot_be_reconstructed")
         path_info = os.lstat(dest)
@@ -225,6 +258,10 @@ def restore_json_added_keys(dest, expected, identity, item):
         raise
     finally:
         os.close(fd)
+
+
+def restore_json_added_keys(dest, expected, identity, item):
+    return restore_json_inverse(dest, expected, identity, item)
 
 
 def preview_directory(directory):
@@ -263,7 +300,7 @@ def preview_directory(directory):
             planned = plan(receipt)
             item["kind"] = planned[0][0]
             destinations.setdefault(planned[0][1], []).append(len(results))
-            if planned[0][0] == "json_added_keys" and planned[0][4].get("inverse_version") != 1:
+            if planned[0][0] in ("json_added_keys", "json_list_append") and planned[0][4].get("inverse_version") != 1:
                 item.update(status="preview_only", reason="json_inverse_not_yet_available")
             else:
                 item["status"] = "ready"
@@ -288,7 +325,7 @@ def apply_directory(directory):
     if report["status"] != "ready":
         return report
     priority = {"git_config_pair": 0, "git_config": 0, "appended_block": 1,
-                "json_added_keys": 1, "created_file": 2}
+                "json_added_keys": 1, "json_list_append": 1, "created_file": 2}
     prepared = []
     destinations = set()
     for item in report["items"]:
@@ -349,7 +386,7 @@ def main():
         check_receipt_location(args.receipt)
         planned = plan(json.loads(read_regular(args.receipt)))
         if args.apply:
-            if any(kind == "json_added_keys" and item.get("inverse_version") != 1
+            if any(kind in ("json_added_keys", "json_list_append") and item.get("inverse_version") != 1
                    for kind, _, _, _, item in planned):
                 raise ValueError("json_inverse_not_yet_available")
             # Recheck each file immediately before removal. A changed file is
@@ -388,13 +425,13 @@ def main():
                         os.fsync(fd)
                     finally:
                         os.close(fd)
-                elif kind == "json_added_keys":
-                    restore_json_added_keys(dest, expected, identity, item)
+                elif kind in ("json_added_keys", "json_list_append"):
+                    restore_json_inverse(dest, expected, identity, item)
                 else:
                     os.unlink(dest)
         status = "ready"
         if args.apply:
-            status = "restored" if planned[0][0] in ("git_config", "git_config_pair", "appended_block", "json_added_keys") else "removed"
+            status = "restored" if planned[0][0] in ("git_config", "git_config_pair", "appended_block", "json_added_keys", "json_list_append") else "removed"
         result = {"schema_version": 1, "runner": "rollback", "status": status, "dry_run": not args.apply, "files": len(planned), "exit_code": 0}
         code = 0
     except (OSError, ValueError, TypeError, KeyError, UnicodeError, json.JSONDecodeError) as error:

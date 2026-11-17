@@ -127,6 +127,19 @@ try {
     $customJson = Join-Path $fixtureHome 'custom.json'
     $customPrior = '{"user":true}'
     [IO.File]::WriteAllText($customJson, $customPrior)
+    $permissionJson = Join-Path $fixtureHome 'permissions.json'
+    $permissionPrior = ([Text.UTF8Encoding]::new($false)).GetBytes((@(
+        '{', '  "permissions": {', '    "allow": [', '      "Read(existing)"',
+        '    ],', '    "deny": [],', '    "defaultMode": "default"',
+        '  },', '  "user": true', '}'
+    ) -join "`n") + "`n")
+    [IO.File]::WriteAllBytes($permissionJson, $permissionPrior)
+    $permissionPriorTicks = (Get-Item -LiteralPath $permissionJson).LastWriteTimeUtc.Ticks
+    $permissionConflict = Join-Path $fixtureHome 'permissions-conflict.json'
+    [IO.File]::WriteAllBytes($permissionConflict, $permissionPrior)
+    $permissionCustom = Join-Path $fixtureHome 'permissions-custom.json'
+    $permissionCustomPrior = '{"permissions":{"allow":[],"deny":[],"defaultMode":"default"}}'
+    [IO.File]::WriteAllText($permissionCustom, $permissionCustomPrior)
     $manifest = [ordered]@{
         id = 'pilot'
         label = 'Rollback synthetic target'
@@ -176,6 +189,27 @@ try {
             strategy = 'merge-missing-keys'
             format = 'json'
             payload = @{ managed = $true }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/permissions.json' }
+            strategy = 'merge-permission-lists'
+            format = 'json'
+            list_parent = 'permissions'
+            lists = @('allow', 'deny')
+            payload = @{ permissions = @{ allow = @('Read(new)'); deny = @('Bash(blocked)'); defaultMode = 'default' } }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/permissions-conflict.json' }
+            strategy = 'merge-permission-lists'
+            format = 'json'
+            list_parent = 'permissions'
+            lists = @('allow', 'deny')
+            payload = @{ permissions = @{ allow = @('Read(new)'); deny = @('Bash(blocked)'); defaultMode = 'default' } }
+        }, [ordered]@{
+            dest = @{ windows = '${HOME}/permissions-custom.json' }
+            strategy = 'merge-permission-lists'
+            format = 'json'
+            list_parent = 'permissions'
+            lists = @('allow', 'deny')
+            payload = @{ permissions = @{ allow = @('Read(new)'); deny = @('Bash(blocked)'); defaultMode = 'default' } }
         })
     }
     [IO.File]::WriteAllText((Join-Path $fixtureTargets 'pilot.json'), ($manifest | ConvertTo-Json -Depth 8))
@@ -237,6 +271,50 @@ try {
     if ($null -ne $customReceipt -or [IO.File]::ReadAllText($customJson) -cne $customPrior -or
         (Test-Path -LiteralPath ($customJson + '.bak'))) {
         throw 'custom_json_was_modified'
+    }
+    $permissionReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        $record = [IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json
+        $record.operations[0].destination -eq $permissionJson -and
+        $record.operations[0].kind -eq 'json_list_append'
+    } | Select-Object -First 1
+    if ($null -eq $permissionReceipt) { throw 'permission_list_receipt_missing' }
+    $permissionRecord = [IO.File]::ReadAllText($permissionReceipt.FullName) | ConvertFrom-Json
+    if ($permissionRecord.operations[0].prior_lengths.allow -ne 1 -or
+        $permissionRecord.operations[0].prior_lengths.deny -ne 0 -or
+        ([IO.File]::ReadAllText($permissionReceipt.FullName)).Contains('Read(existing)')) {
+        throw 'permission_list_receipt_invalid'
+    }
+    $permissionPreview = & powershell -NoProfile -File $rollback -Receipt $permissionReceipt.FullName | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $permissionPreview.status -ne 'ready') {
+        throw 'permission_list_preview_failed'
+    }
+    $permissionRestored = & powershell -NoProfile -File $rollback -Receipt $permissionReceipt.FullName -Apply | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $permissionRestored.status -ne 'restored' -or
+        -not [Collections.StructuralComparisons]::StructuralEqualityComparer.Equals(
+            [IO.File]::ReadAllBytes($permissionJson), $permissionPrior) -or
+        (Get-Item -LiteralPath $permissionJson).LastWriteTimeUtc.Ticks -ne $permissionPriorTicks) {
+        throw 'permission_list_restore_failed'
+    }
+    $permissionConflictReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        $record = [IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json
+        $record.operations[0].destination -eq $permissionConflict -and
+        $record.operations[0].kind -eq 'json_list_append'
+    } | Select-Object -First 1
+    if ($null -eq $permissionConflictReceipt) { throw 'permission_conflict_receipt_missing' }
+    [IO.File]::AppendAllText($permissionConflict, ' ')
+    $permissionConflictContent = [IO.File]::ReadAllText($permissionConflict)
+    $permissionBlocked = & powershell -NoProfile -File $rollback -Receipt $permissionConflictReceipt.FullName | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 2 -or $permissionBlocked.status -ne 'blocked' -or
+        [IO.File]::ReadAllText($permissionConflict) -cne $permissionConflictContent) {
+        throw 'changed_permission_list_was_not_blocked'
+    }
+    $permissionCustomReceipt = Get-ChildItem -LiteralPath $receiptDir -Filter '*.json' | Where-Object {
+        $record = [IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json
+        $record.operations[0].destination -eq $permissionCustom
+    } | Select-Object -First 1
+    if ($null -eq $permissionCustomReceipt -or
+        ([IO.File]::ReadAllText($permissionCustomReceipt.FullName) | ConvertFrom-Json).operations[0].kind -ne 'manual_review') {
+        throw 'custom_permission_list_not_marked_for_review'
     }
     $managed = Join-Path $fixtureHome 'managed.json'
     if (-not (Test-Path -LiteralPath $managed)) { throw 'engine_did_not_write' }

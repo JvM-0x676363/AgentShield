@@ -186,6 +186,71 @@ class CreatedFileReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "prior_json_cannot_be_reconstructed"):
             plan(receipt)
 
+    def test_canonical_permission_lists_restore_only_appended_rules(self):
+        spec = {"list_parent": "permissions", "lists": ["allow", "deny"],
+                "payload": {"permissions": {"allow": ["Read(new)"],
+                                            "deny": ["Bash(blocked)"],
+                                            "defaultMode": "default"}}}
+        prior = {"theme": "user", "permissions": {"allow": ["Read(existing)"],
+                 "deny": [], "defaultMode": "default"}}
+        original = target_engine.dump_json(prior).encode("utf-8")
+        self.destination.write_bytes(original)
+        os.utime(self.destination, ns=(1_700_000_000_000_000_000,
+                                        1_700_000_000_000_000_000))
+        prior_mtime = os.lstat(self.destination).st_mtime_ns
+        with mock.patch.object(target_engine, "RECEIPT_DIR", str(self.receipts)):
+            target_engine.strat_merge_permission_lists(spec, str(self.destination), str(ROOT), False)
+        receipt_path = next(self.receipts.glob("*.json"))
+        receipt = json.loads(receipt_path.read_text())
+        operation = receipt["operations"][0]
+        self.assertEqual(operation["kind"], "json_list_append")
+        self.assertEqual(operation["prior_lengths"], {"allow": 1, "deny": 0})
+        self.assertNotIn("Read(existing)", receipt_path.read_text())
+        self.assertEqual(plan(receipt)[0][0], "json_list_append")
+        applied = subprocess.run([
+            sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+            "--receipt-dir", str(self.receipts), "--apply",
+        ], capture_output=True, text=True, check=False)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertEqual(self.destination.read_bytes(), original)
+        self.assertEqual(os.lstat(self.destination).st_mtime_ns, prior_mtime)
+
+    def test_permission_list_inverse_blocks_changed_file_and_prior_hash(self):
+        spec = {"list_parent": "permissions", "lists": ["allow"],
+                "payload": {"permissions": {"allow": ["Read(new)"]}}}
+        prior = target_engine.dump_json({"permissions": {"allow": ["Read(existing)"]}}).encode("utf-8")
+        self.destination.write_bytes(prior)
+        with mock.patch.object(target_engine, "RECEIPT_DIR", str(self.receipts)):
+            target_engine.strat_merge_permission_lists(spec, str(self.destination), str(ROOT), False)
+        receipt = json.loads(next(self.receipts.glob("*.json")).read_text())
+        receipt["operations"][0]["prior_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "prior_json_cannot_be_reconstructed"):
+            plan(receipt)
+        self.destination.write_bytes(prior)
+        with self.assertRaisesRegex(ValueError, "destination_"):
+            plan(receipt)
+
+    def test_permission_list_inverse_requires_canonical_append_only_change(self):
+        spec = {"list_parent": "permissions", "lists": ["allow"],
+                "payload": {"permissions": {"allow": ["Read(new)"],
+                                            "defaultMode": "default"}}}
+        for name, prior in (
+                ("custom", b'{"permissions":{"allow":[],"defaultMode":"default"}}\n'),
+                ("overwrite", target_engine.dump_json({"permissions": {
+                    "allow": [], "defaultMode": "custom"}}).encode("utf-8")),
+                ("missing-list", target_engine.dump_json({"permissions": {
+                    "defaultMode": "default"}}).encode("utf-8"))):
+            with self.subTest(name=name):
+                destination = pathlib.Path(self.temp.name) / (name + ".json")
+                receipts = pathlib.Path(self.temp.name) / (name + "-receipts")
+                destination.write_bytes(prior)
+                with mock.patch.object(target_engine, "RECEIPT_DIR", str(receipts)):
+                    target_engine.strat_merge_permission_lists(spec, str(destination), str(ROOT), False)
+                receipt = json.loads(next(receipts.glob("*.json")).read_text())
+                self.assertEqual(receipt["operations"][0]["kind"], "manual_review")
+                self.assertEqual(receipt["operations"][0]["reason"],
+                                 "existing_target_has_no_inverse")
+
     def test_canonical_json_reports_partial_after_write_failure(self):
         prior, _, _, receipt_path = self.reversible_json_receipt()
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))

@@ -28,7 +28,7 @@ import shutil
 import sys
 import time
 
-from rollback_receipt import ensure_private_directory, record_appended_block, record_created_file, record_json_added_keys, record_manual_review
+from rollback_receipt import ensure_private_directory, record_appended_block, record_created_file, record_json_added_keys, record_json_list_append, record_manual_review
 
 RECEIPT_DIR = None
 
@@ -268,7 +268,22 @@ def strat_merge_permission_lists(spec, dst, root, dry_run):
     if not isinstance(data, dict):
         raise TargetError(f"{dst}: expected top-level object")
 
-    backup(dst, dry_run)
+    prior_data = copy.deepcopy(data)
+    prior_serialized = dump_json(data)
+    prior_block = prior_data.get(parent)
+    reversible = isinstance(prior_block, dict)
+    lengths = {}
+    if reversible:
+        for name in lists:
+            if payload.get(name):
+                before = prior_block.get(name)
+                if not isinstance(before, list):
+                    reversible = False
+                    break
+                lengths[name] = len(before)
+        if any(k not in prior_block or prior_block[k] != v
+               for k, v in payload.items() if k not in lists):
+            reversible = False
     block = data.setdefault(parent, {})
     if not isinstance(block, dict):
         raise TargetError(f"{dst}: '{parent}' exists and is not an object")
@@ -289,7 +304,31 @@ def strat_merge_permission_lists(spec, dst, root, dry_run):
         if k not in lists:
             block[k] = v
 
-    write_text(dst, dump_json(data), dry_run)
+    content = dump_json(data)
+    if data == prior_data:
+        return "unchanged (rules already present)"
+    prior_content = prior_info = None
+    if RECEIPT_DIR and not dry_run and reversible and added:
+        prior_info = os.lstat(dst)
+        with open(dst, "rb") as source:
+            prior_content = source.read(1024 * 1024 + 1)
+        after_read = os.lstat(dst)
+        if ((prior_info.st_dev, prior_info.st_ino, prior_info.st_mtime_ns, prior_info.st_size) !=
+                (after_read.st_dev, after_read.st_ino, after_read.st_mtime_ns, after_read.st_size)):
+            raise TargetError("JSON target changed before merge")
+        if (len(prior_content) > 1024 * 1024 or len(content.encode("utf-8")) > 1024 * 1024 or
+                prior_content != prior_serialized.encode("utf-8")):
+            prior_content = prior_info = None
+    if not RECEIPT_DIR:
+        backup(dst, dry_run)
+    guard_id = write_text(dst, content, dry_run, reversible_existing=prior_content is not None)
+    if prior_content is not None:
+        try:
+            record_json_list_append(dst, content.encode("utf-8"), RECEIPT_DIR,
+                                    parent, lengths, prior_content, prior_info)
+            os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
     return f"merged (+{added} rules)"
 
 

@@ -486,8 +486,28 @@ function Invoke-MergePermissionLists {
     $res = Read-JsonTolerant -Path $Dst -TolerateJsonc $tolerate
     if (-not $res.Ok) { return "preserved (parse failed)" }
     $data = $res.Data
-
-    Backup-File -Path $Dst -Dry $Dry
+    $priorCanonical = ConvertTo-JsonText $data
+    $reversible = $data.Contains($parent) -and $data[$parent] -is [Collections.IDictionary]
+    $priorLengths = [ordered]@{}
+    if ($reversible) {
+        $priorBlock = $data[$parent]
+        foreach ($name in $lists) {
+            if (-not $payload.Contains($name) -or @($payload[$name]).Count -eq 0) { continue }
+            if (-not $priorBlock.Contains($name) -or
+                $priorBlock[$name] -isnot [Collections.IList]) {
+                $reversible = $false
+                break
+            }
+            $priorLengths[$name] = @($priorBlock[$name]).Count
+        }
+        foreach ($key in $payload.Keys) {
+            if ($lists -contains $key) { continue }
+            if (-not $priorBlock.Contains($key) -or
+                (ConvertTo-JsonValue $priorBlock[$key]) -cne (ConvertTo-JsonValue $payload[$key])) {
+                $reversible = $false
+            }
+        }
+    }
 
     if (-not $data.Contains($parent)) {
         $data[$parent] = New-Object System.Collections.Specialized.OrderedDictionary
@@ -511,7 +531,37 @@ function Invoke-MergePermissionLists {
     }
 
     $content = ConvertTo-JsonText $data
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry
+    if ($content -ceq $priorCanonical) { return "unchanged (rules already present)" }
+    $priorBytes = $null
+    $priorCreationTicks = $priorWriteTicks = 0
+    if ($ReceiptDir -and -not $Dry -and $reversible -and $added -gt 0) {
+        $priorItem = Get-Item -LiteralPath $Dst -Force -ErrorAction Stop
+        if (-not $priorItem.PSIsContainer -and
+            ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
+            $priorItem.Length -le 1048576 -and
+            ([Text.UTF8Encoding]::new($false)).GetByteCount($content) -le 1048576) {
+            $candidate = [IO.File]::ReadAllBytes($Dst)
+            $canonical = ([Text.UTF8Encoding]::new($false)).GetBytes($priorCanonical)
+            if ($candidate.Length -eq $canonical.Length -and
+                [Collections.StructuralComparisons]::StructuralEqualityComparer.Equals($candidate, $canonical)) {
+                $priorBytes = $candidate
+                $priorCreationTicks = $priorItem.CreationTimeUtc.Ticks
+                $priorWriteTicks = $priorItem.LastWriteTimeUtc.Ticks
+            }
+        }
+    }
+    if (-not $ReceiptDir) { Backup-File -Path $Dst -Dry $Dry }
+    $guard = Write-OrPreview -Path $Dst -Content $content -Dry $Dry `
+        -ReversibleExisting ($null -ne $priorBytes) -ExpectedPriorBytes $priorBytes
+    if ($null -ne $priorBytes) {
+        $installedBytes = ([Text.UTF8Encoding]::new($false)).GetBytes($content)
+        Write-AgentShieldJsonListReceipt -Destination $Dst -ReceiptDir $ReceiptDir `
+            -PriorBytes $priorBytes -PriorCreationTicks $priorCreationTicks `
+            -PriorWriteTicks $priorWriteTicks -InstalledBytes $installedBytes `
+            -Parent $parent -PriorLengths $priorLengths | Out-Null
+        Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+        Remove-Item -LiteralPath $guard -Force
+    }
     return "merged (+$added rules)"
 }
 

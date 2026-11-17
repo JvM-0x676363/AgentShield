@@ -42,7 +42,7 @@ if ($ReceiptDir -or -not $Receipt) {
                     $destinations[$destination].Add($items.Count)
                     if ($result.status -eq 'ready') {
                         $priority = $(if ($item['kind'] -in @('git_config', 'git_config_pair')) { 0 }
-                            elseif ($item['kind'] -in @('appended_block', 'known_prior_payload', 'json_added_keys')) { 1 } else { 2 })
+                            elseif ($item['kind'] -in @('appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append')) { 1 } else { 2 })
                         $prepared += [pscustomobject]@{
                             Priority = $priority; Id = $entry.BaseName; Path = $entry.FullName
                             Digest = $beforeDigest; Index = $items.Count
@@ -172,6 +172,133 @@ function Get-PriorJsonBytes {
     return ,$prior
 }
 
+function ConvertTo-RollbackJsonString {
+    param([string]$Text)
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    foreach ($character in $Text.ToCharArray()) {
+        $code = [int]$character
+        if ($character -eq '"') { [void]$builder.Append('\"') }
+        elseif ($character -eq '\') { [void]$builder.Append('\\') }
+        elseif ($character -eq "`n") { [void]$builder.Append('\n') }
+        elseif ($character -eq "`r") { [void]$builder.Append('\r') }
+        elseif ($character -eq "`t") { [void]$builder.Append('\t') }
+        elseif ($character -eq "`b") { [void]$builder.Append('\b') }
+        elseif ($character -eq "`f") { [void]$builder.Append('\f') }
+        elseif ($code -lt 32) { [void]$builder.Append(('\u{0:x4}' -f $code)) }
+        else { [void]$builder.Append($character) }
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function ConvertTo-RollbackJsonValue {
+    param($Value, [int]$Level = 0)
+    $pad = ' ' * (2 * $Level)
+    $inner = ' ' * (2 * ($Level + 1))
+    if ($null -eq $Value) { return 'null' }
+    if ($Value -is [bool]) { if ($Value) { return 'true' } else { return 'false' } }
+    if ($Value -is [string]) { return (ConvertTo-RollbackJsonString $Value) }
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [int64]) {
+        return $Value.ToString([Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [double] -or $Value -is [decimal] -or $Value -is [single]) {
+        return ([double]$Value).ToString('R', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [Collections.IDictionary]) {
+        if ($Value.Count -eq 0) { return '{}' }
+        $parts = @()
+        foreach ($key in $Value.Keys) {
+            $parts += ($inner + (ConvertTo-RollbackJsonString ([string]$key)) + ': ' +
+                       (ConvertTo-RollbackJsonValue $Value[$key] ($Level + 1)))
+        }
+        return "{`n" + ($parts -join ",`n") + "`n" + $pad + '}'
+    }
+    if ($Value -is [Collections.IEnumerable]) {
+        $entries = @($Value)
+        if ($entries.Count -eq 0) { return '[]' }
+        $parts = @()
+        foreach ($entry in $entries) {
+            $parts += ($inner + (ConvertTo-RollbackJsonValue $entry ($Level + 1)))
+        }
+        return "[`n" + ($parts -join ",`n") + "`n" + $pad + ']'
+    }
+    return (ConvertTo-RollbackJsonString ([string]$Value))
+}
+
+function ConvertTo-RollbackOrderedValue {
+    param($Value)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [pscustomobject]) {
+        $dictionary = [Collections.Specialized.OrderedDictionary]::new()
+        foreach ($property in $Value.PSObject.Properties) {
+            $dictionary[$property.Name] = ConvertTo-RollbackOrderedValue $property.Value
+        }
+        return $dictionary
+    }
+    if ($Value -is [Collections.IDictionary]) {
+        $dictionary = [Collections.Specialized.OrderedDictionary]::new()
+        foreach ($key in $Value.Keys) {
+            $dictionary[$key] = ConvertTo-RollbackOrderedValue $Value[$key]
+        }
+        return $dictionary
+    }
+    if ($Value -is [Collections.IEnumerable] -and $Value -isnot [string]) {
+        $list = [Collections.ArrayList]::new()
+        foreach ($entry in $Value) { [void]$list.Add((ConvertTo-RollbackOrderedValue $entry)) }
+        return ,$list
+    }
+    return $Value
+}
+
+function Get-PriorJsonListBytes {
+    param($Operation, [byte[]]$InstalledBytes)
+    $priorLength = [long]$Operation.prior_length
+    if ($Operation.inverse_version -ne 1 -or $priorLength -lt 3 -or
+        $priorLength -gt 1048576 -or $InstalledBytes.Length -gt 1048576 -or
+        [string]$Operation.prior_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        [long]$Operation.prior_creation_utc_ticks -le 0 -or
+        [long]$Operation.prior_write_utc_ticks -le 0 -or
+        -not [string]$Operation.parent) { throw 'invalid_json_inverse' }
+    $lengths = $Operation.prior_lengths
+    if ($lengths -isnot [pscustomobject] -or
+        @($lengths.PSObject.Properties).Count -lt 1 -or
+        @($lengths.PSObject.Properties).Count -gt 256) { throw 'invalid_json_inverse' }
+    try { $parsed = ([Text.UTF8Encoding]::new($false, $true)).GetString($InstalledBytes) | ConvertFrom-Json }
+    catch { throw 'invalid_installed_json' }
+    $data = ConvertTo-RollbackOrderedValue $parsed
+    if ($data -isnot [Collections.IDictionary] -or -not $data.Contains([string]$Operation.parent)) {
+        throw 'installed_lists_changed'
+    }
+    $canonical = (ConvertTo-RollbackJsonValue $data) + "`n"
+    if (-not [Collections.StructuralComparisons]::StructuralEqualityComparer.Equals(
+            ([Text.UTF8Encoding]::new($false)).GetBytes($canonical), $InstalledBytes)) {
+        throw 'invalid_installed_json'
+    }
+    $block = $data[[string]$Operation.parent]
+    if ($block -isnot [Collections.IDictionary]) { throw 'installed_lists_changed' }
+    $appended = $false
+    foreach ($property in $lengths.PSObject.Properties) {
+        $name = [string]$property.Name
+        $length = $property.Value
+        if (-not $name -or $length -isnot [int] -and $length -isnot [long] -or
+            [long]$length -lt 0 -or -not $block.Contains($name) -or
+            $block[$name] -isnot [Collections.IList] -or
+            [long]$length -gt $block[$name].Count) { throw 'invalid_json_list_inverse' }
+        if ([long]$length -lt $block[$name].Count) { $appended = $true }
+        while ($block[$name].Count -gt [long]$length) {
+            $block[$name].RemoveAt($block[$name].Count - 1)
+        }
+    }
+    if (-not $appended) { throw 'invalid_json_list_inverse' }
+    $prior = ([Text.UTF8Encoding]::new($false)).GetBytes((ConvertTo-RollbackJsonValue $data) + "`n")
+    if ($prior.Length -ne $priorLength -or
+        (Get-BytesSha256 $prior) -cne [string]$Operation.prior_sha256) {
+        throw 'prior_json_cannot_be_reconstructed'
+    }
+    return ,$prior
+}
+
 try {
     $receiptPath = [IO.Path]::GetFullPath($Receipt)
     Assert-AgentShieldPrivateReceiptPath -LiteralPath (Split-Path -Parent $receiptPath) -Directory
@@ -180,7 +307,7 @@ try {
     if ($metadata.schema_version -ne 1 -or $metadata.runner -ne 'agentshield-rollback' -or
         @($metadata.operations).Count -ne 1) { throw 'invalid_receipt' }
     $operation = @($metadata.operations)[0]
-    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair', 'manual_review', 'known_prior_payload', 'json_added_keys')) { throw 'unsupported_operation' }
+    if ($operation.kind -notin @('created_file', 'appended_block', 'git_config', 'git_config_pair', 'manual_review', 'known_prior_payload', 'json_added_keys', 'json_list_append')) { throw 'unsupported_operation' }
     $destination = [string]$operation.destination
     Assert-AgentShieldLocalReceiptPath -LiteralPath $destination
     if ([IO.Path]::GetFullPath($destination) -ne $destination) { throw 'invalid_destination' }
@@ -194,7 +321,7 @@ try {
         } | ConvertTo-Json -Compress
         exit 2
     }
-    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys')) {
+    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append')) {
         $expected = [string]$operation.installed_sha256
         if ($expected -cnotmatch '^[0-9a-f]{64}$') { throw 'invalid_digest' }
         if ($operation.kind -eq 'json_added_keys') {
@@ -269,7 +396,7 @@ try {
         [long]$operation.installed_write_utc_ticks -ne [long]$item.LastWriteTimeUtc.Ticks) {
         throw 'destination_replaced_or_reinstalled'
     }
-    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys')) {
+    if ($operation.kind -in @('created_file', 'appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append')) {
         if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) {
             throw 'destination_changed'
         }
@@ -284,6 +411,9 @@ try {
                 @($operation.added_keys | Where-Object { $parsed.PSObject.Properties.Name -cnotcontains $_ }).Count) {
                 throw 'installed_keys_changed'
             }
+        } elseif ($operation.kind -eq 'json_list_append') {
+            $installedBytes = [IO.File]::ReadAllBytes($destination)
+            $null = Get-PriorJsonListBytes -Operation $operation -InstalledBytes $installedBytes
         }
     } elseif ($operation.kind -eq 'git_config' -and
         (Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $operation.key) -cne [string]$operation.installed_value) {
@@ -343,7 +473,7 @@ try {
                     throw 'known_prior_partial_restore'
                 }
             } catch { throw 'known_prior_partial_restore' }
-        } elseif ($operation.kind -eq 'json_added_keys') {
+        } elseif ($operation.kind -in @('json_added_keys', 'json_list_append')) {
             $stream = [IO.File]::Open($destination, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
             $writeStarted = $false
             try {
@@ -363,7 +493,11 @@ try {
                     $offset += $count
                 }
                 if ((Get-BytesSha256 $bytes) -cne $expected) { throw 'destination_changed' }
-                $priorBytes = Get-PriorJsonBytes -Operation $operation -InstalledBytes $bytes
+                if ($operation.kind -eq 'json_added_keys') {
+                    $priorBytes = Get-PriorJsonBytes -Operation $operation -InstalledBytes $bytes
+                } else {
+                    $priorBytes = Get-PriorJsonListBytes -Operation $operation -InstalledBytes $bytes
+                }
                 $writeStarted = $true
                 $stream.Position = 0
                 $stream.SetLength(0)
@@ -443,7 +577,7 @@ try {
     [ordered]@{
         schema_version = 1
         runner = 'rollback'
-        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'git_config_pair', 'appended_block', 'known_prior_payload', 'json_added_keys')) { 'restored' } else { 'removed' })
+        status = $(if (-not $Apply) { 'ready' } elseif ($operation.kind -in @('git_config', 'git_config_pair', 'appended_block', 'known_prior_payload', 'json_added_keys', 'json_list_append')) { 'restored' } else { 'removed' })
         dry_run = -not [bool]$Apply
         files = 1
         exit_code = 0
