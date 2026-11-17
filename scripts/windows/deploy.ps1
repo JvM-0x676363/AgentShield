@@ -516,7 +516,9 @@ foreach ($user in $targetUsers) {
         # (targets\vscode.json), alongside the rest of the configuration above.
 
         # --- Git hooks (audit mode) ---
-        if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $userHooksDir | Out-Null }
+        if (-not $DryRun -and -not $ExperimentalReceiptDir) {
+            New-Item -ItemType Directory -Force -Path $userHooksDir | Out-Null
+        }
         $userPreCommit = Join-Path $userHooksDir "pre-commit"
         $userScanRunner = Join-Path $userHooksDir "agent-shield-scan.py"
         $userScanRules = Join-Path $userHooksDir "agent-shield-rules"
@@ -524,6 +526,19 @@ foreach ($user in $targetUsers) {
         $createdHookGuards = @{}
         $existingHookFiles = @()
         if ($ExperimentalReceiptDir -and -not $DryRun) {
+            foreach ($directory in @($userHooksDir, $userScanRules, $userTemplateDir,
+                    (Join-Path $userTemplateDir 'hooks'))) {
+                Assert-AgentShieldDestinationParents -Destination $directory
+                if (Test-Path -LiteralPath $directory) {
+                    $existingDirectory = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+                    if (-not $existingDirectory.PSIsContainer -or
+                        ($existingDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                        throw 'experimental_receipt_directory_unsafe'
+                    }
+                } else {
+                    New-Item -ItemType Directory -Path $directory -ErrorAction Stop | Out-Null
+                }
+            }
             foreach ($managedFile in @($userPreCommit, $userScanRunner,
                     (Join-Path $userScanRules 'agentshield-baseline.yml'),
                     (Join-Path $userTemplateDir 'hooks\pre-commit'))) {

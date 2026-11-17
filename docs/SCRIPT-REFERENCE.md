@@ -161,6 +161,18 @@ with their timestamps, and confirms that a
 pre-existing target file blocks batch rollback. It retains the temporary
 directory for inspection.
 
+For an isolated fleet-deploy pilot, run `powershell -NoProfile
+-ExecutionPolicy Bypass -File tests/rollback-deploy-windows.ps1` from an elevated
+PowerShell session, or `sudo bash tests/rollback-deploy-unix.sh` on Linux/WSL.
+Each test makes a temporary copy of the deploy script and substitutes only two
+temporary profile paths; the Unix copy also skips the host log and machine
+package prerequisite. Both retain the real privilege gate, target engine,
+receipt writer, and rollback. A clean two-profile run must roll back both
+profiles; a second run with one pre-existing file must block the entire batch.
+The two paths share one test OS identity. These pilots verify profile-path
+isolation, not ACL or ownership separation between distinct accounts. They
+retain their evidence directories for inspection and do not exercise macOS.
+
 `-Only` filters AI configuration only. Git hooks, scanner tools, and VS Code
 extensions remain separate layers controlled by their dedicated flags.
 
