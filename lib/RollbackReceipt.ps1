@@ -92,6 +92,29 @@ function Write-AgentShieldManualReviewReceipt {
     return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
 }
 
+function Clear-AgentShieldGitProvisionalReceipt {
+    param(
+        [Parameter(Mandatory)][string]$GuardPath,
+        [Parameter(Mandatory)][string]$InversePath,
+        [Parameter(Mandatory)][string]$Destination
+    )
+    Assert-AgentShieldPrivateReceiptPath -LiteralPath $GuardPath
+    Assert-AgentShieldPrivateReceiptPath -LiteralPath $InversePath
+    $guard = [IO.File]::ReadAllText($GuardPath) | ConvertFrom-Json
+    $inverse = [IO.File]::ReadAllText($InversePath) | ConvertFrom-Json
+    if ($guard.schema_version -ne 1 -or $guard.runner -cne 'agentshield-rollback' -or
+        @($guard.operations).Count -ne 1 -or $guard.operations[0].kind -cne 'manual_review' -or
+        $guard.operations[0].reason -cne 'receipt_incomplete' -or
+        $guard.operations[0].destination -cne $Destination -or
+        $inverse.schema_version -ne 1 -or $inverse.runner -cne 'agentshield-rollback' -or
+        @($inverse.operations).Count -ne 1 -or
+        $inverse.operations[0].kind -notin @('git_config', 'git_config_pair') -or
+        $inverse.operations[0].destination -cne $Destination) {
+        throw 'git_inverse_receipt_missing'
+    }
+    Remove-Item -LiteralPath $GuardPath -Force -ErrorAction Stop
+}
+
 function Write-AgentShieldCreatedReceipt {
     param(
         [Parameter(Mandatory)][string]$Destination,
@@ -403,6 +426,8 @@ function Set-AgentShieldGitConfigWithReceipt {
     $ConfigPath = [IO.Path]::GetFullPath($ConfigPath)
     $previous = Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key $Key
     if ($previous -ceq $Value) { return $null }
+    $guard = Write-AgentShieldManualReviewReceipt -Destination $ConfigPath `
+        -ReceiptDir $ReceiptDir -Reason 'receipt_incomplete'
     & git config --file $ConfigPath $Key $Value 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0 -or (Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key $Key) -cne $Value) {
         throw 'git_config_write_failed'
@@ -422,7 +447,9 @@ function Set-AgentShieldGitConfigWithReceipt {
             installed_length = [long]$item.Length
         })
     }
-    return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
+    $receipt = Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
+    Clear-AgentShieldGitProvisionalReceipt -GuardPath $guard -InversePath $receipt -Destination $ConfigPath
+    return $receipt
 }
 
 function Set-AgentShieldGitConfigPairWithReceipt {
@@ -439,6 +466,8 @@ function Set-AgentShieldGitConfigPairWithReceipt {
     $previousHooks = Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key 'core.hooksPath'
     $previousTemplate = Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key 'init.templateDir'
     if ($previousHooks -ceq $HooksDir -and $previousTemplate -ceq $TemplateDir) { return $null }
+    $guard = Write-AgentShieldManualReviewReceipt -Destination $ConfigPath `
+        -ReceiptDir $ReceiptDir -Reason 'receipt_incomplete'
     if ($previousHooks -cne $HooksDir) {
         & git config --file $ConfigPath core.hooksPath $HooksDir 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0 -or
@@ -469,5 +498,7 @@ function Set-AgentShieldGitConfigPairWithReceipt {
             installed_length = [long]$item.Length
         })
     }
-    return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
+    $receipt = Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
+    Clear-AgentShieldGitProvisionalReceipt -GuardPath $guard -InversePath $receipt -Destination $ConfigPath
+    return $receipt
 }

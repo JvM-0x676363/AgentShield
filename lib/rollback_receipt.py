@@ -69,7 +69,7 @@ def record_manual_review(destination, receipt_dir, reason="existing_target_has_n
     return identifier
 
 
-def clear_provisional(receipt_dir, identifier):
+def clear_provisional(receipt_dir, identifier, inverse_id=None):
     """Clear only a private provisional marker after its inverse is saved."""
     assert_private_directory(receipt_dir)
     if not re.fullmatch(r"[0-9a-f]{32}", identifier):
@@ -95,9 +95,13 @@ def clear_provisional(receipt_dir, identifier):
     if not isinstance(destination, str) or not os.path.isabs(destination):
         raise ValueError("invalid_provisional_destination")
     inverse_found = False
+    if inverse_id is not None and not re.fullmatch(r"[0-9a-f]{32}", inverse_id):
+        raise ValueError("invalid_inverse_id")
     with os.scandir(receipt_dir) as entries:
         for entry in entries:
             if not re.fullmatch(r"[0-9a-f]{32}\.json", entry.name) or entry.path == path:
+                continue
+            if inverse_id is not None and entry.name != inverse_id + ".json":
                 continue
             candidate_info = os.lstat(entry.path)
             if (not stat.S_ISREG(candidate_info.st_mode) or candidate_info.st_nlink != 1 or
@@ -109,7 +113,8 @@ def clear_provisional(receipt_dir, identifier):
             if (isinstance(candidate, dict) and candidate.get("schema_version") == 1 and
                     candidate.get("runner") == "agentshield-rollback" and
                     isinstance(candidate_ops, list) and len(candidate_ops) == 1 and
-                    isinstance(candidate_ops[0], dict) and candidate_ops[0].get("kind") == "created_file" and
+                    isinstance(candidate_ops[0], dict) and candidate_ops[0].get("kind") in
+                    (("created_file", "git_config", "git_config_pair") if inverse_id else ("created_file",)) and
                     candidate_ops[0].get("destination") == destination):
                 inverse_found = True
                 break

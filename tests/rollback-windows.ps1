@@ -440,6 +440,35 @@ try {
         (& git config --file $configPath --get user.name) -cne 'kept') {
         throw 'git_pair_restore_failed'
     }
+    $failedGitDir = Join-Path $testRoot 'git-receipt-failure'
+    New-PrivateTestDirectory -Path $failedGitDir
+    $failedGitConfig = Join-Path $testRoot 'failed-gitconfig'
+    $script:originalReceiptWriter = (Get-Command Write-AgentShieldReceiptPayload).ScriptBlock
+    try {
+        function Write-AgentShieldReceiptPayload {
+            param($Payload, $ReceiptDir)
+            if ($Payload.operations[0].kind -ceq 'git_config_pair') { throw 'simulated_receipt_failure' }
+            & $script:originalReceiptWriter -Payload $Payload -ReceiptDir $ReceiptDir
+        }
+        try {
+            Set-AgentShieldGitConfigPairWithReceipt -ConfigPath $failedGitConfig `
+                -HooksDir 'C:\failed-hooks' -TemplateDir 'C:\failed-template' `
+                -ReceiptDir $failedGitDir | Out-Null
+            throw 'git_receipt_failure_not_injected'
+        } catch {
+            if ($_.Exception.Message -cne 'simulated_receipt_failure') { throw }
+        }
+    } finally {
+        Set-Item Function:\Write-AgentShieldReceiptPayload -Value $script:originalReceiptWriter
+        Remove-Variable originalReceiptWriter -Scope Script -ErrorAction SilentlyContinue
+    }
+    $failedGitPreview = & powershell -NoProfile -File $rollback -ReceiptDir $failedGitDir | ConvertFrom-Json
+    if ($failedGitPreview.status -ne 'blocked' -or
+        @($failedGitPreview.items).Count -ne 1 -or
+        $failedGitPreview.items[0].reason -cne 'receipt_incomplete' -or
+        (Get-AgentShieldGitConfigValue -ConfigPath $failedGitConfig -Key 'core.hooksPath') -cne 'C:\failed-hooks') {
+        throw 'git_provisional_receipt_missing'
+    }
     $pairConflictReceipt = Set-AgentShieldGitConfigPairWithReceipt -ConfigPath $configPath `
         -HooksDir 'C:\pair-hooks' -TemplateDir 'C:\pair-template' -ReceiptDir $receiptDir
     & git config --file $configPath core.hooksPath 'C:\user-new-hooks' | Out-Null

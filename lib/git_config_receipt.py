@@ -7,7 +7,7 @@ import pathlib
 import stat
 import subprocess
 
-from rollback_receipt import ensure_private_directory, record_git_config, record_git_config_pair
+from rollback_receipt import clear_provisional, ensure_private_directory, record_git_config, record_git_config_pair, record_manual_review
 
 
 SUPPORTED_KEYS = frozenset(("core.hooksPath", "init.templateDir"))
@@ -62,13 +62,16 @@ def set_with_receipt(config_path, key, installed_value, receipt_dir):
     previous = read_key(config_path, key)
     if previous == installed_value:
         return None
+    guard = record_manual_review(config_path, receipt_dir, "receipt_incomplete")
     result = subprocess.run(
         ["git", "config", "--file", config_path, key, installed_value],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
     )
     if result.returncode != 0 or read_key(config_path, key) != installed_value:
         raise ValueError("git_config_write_failed")
-    return record_git_config(config_path, key, installed_value, previous, receipt_dir)
+    receipt = record_git_config(config_path, key, installed_value, previous, receipt_dir)
+    clear_provisional(receipt_dir, guard, receipt)
+    return receipt
 
 
 def restore_key(config_path, key, installed_value, previous_value, identity):
@@ -107,6 +110,7 @@ def set_pair_with_receipt(config_path, installed_values, receipt_dir):
     previous = {key: read_key(config_path, key) for key in PAIR_KEYS}
     if all(previous[key] == installed_values[key] for key in PAIR_KEYS):
         return None
+    guard = record_manual_review(config_path, receipt_dir, "receipt_incomplete")
     for key in PAIR_KEYS:
         if previous[key] == installed_values[key]:
             continue
@@ -118,7 +122,9 @@ def set_pair_with_receipt(config_path, installed_values, receipt_dir):
             raise ValueError("git_config_pair_write_failed")
     values = {key: {"installed_value": installed_values[key], "previous_value": previous[key]}
               for key in PAIR_KEYS}
-    return record_git_config_pair(config_path, values, receipt_dir)
+    receipt = record_git_config_pair(config_path, values, receipt_dir)
+    clear_provisional(receipt_dir, guard, receipt)
+    return receipt
 
 
 def restore_pair(config_path, values, identity):

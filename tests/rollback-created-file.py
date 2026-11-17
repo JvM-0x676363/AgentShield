@@ -680,6 +680,19 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.assertEqual(subprocess.run(["git", "config", "--file", str(config), "--get", "user.name"],
                                         capture_output=True, text=True, check=False).stdout.strip(), "kept")
 
+    def test_git_pair_receipt_failure_keeps_manual_review_marker(self):
+        config = pathlib.Path(self.temp.name) / "gitconfig"
+        with mock.patch("git_config_receipt.record_git_config_pair", side_effect=OSError("simulated_receipt_failure")):
+            with self.assertRaisesRegex(OSError, "simulated_receipt_failure"):
+                set_pair_with_receipt(str(config), {
+                    "core.hooksPath": "/new-hooks", "init.templateDir": "/new-template",
+                }, str(self.receipts))
+        self.assertEqual(read_key(str(config), "core.hooksPath"), "/new-hooks")
+        receipts = list(self.receipts.glob("*.json"))
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(json.loads(receipts[0].read_text())["operations"][0]["reason"], "receipt_incomplete")
+        self.assertEqual(apply_directory(str(self.receipts))["status"], "blocked")
+
     def test_git_pair_conflict_preserves_both_keys(self):
         config = pathlib.Path(self.temp.name) / "gitconfig"
         set_pair_with_receipt(str(config), {

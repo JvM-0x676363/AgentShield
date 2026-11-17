@@ -98,6 +98,9 @@ New hook and scanner destinations receive a provisional marker before copying;
 the marker is cleared only after their created-file receipt is recorded. An
 interrupted copy therefore blocks batch apply instead of disappearing from its
 coverage report.
+The Git configuration pair also receives a provisional marker before either
+key is changed. A failed Git write or receipt write leaves that marker for
+manual review; it is cleared only after the matching inverse receipt is saved.
 
 The Windows source-checkout pilot also recognizes the Claude managed status
 line from the first public AgentShield revision. If its current SHA-256 matches
