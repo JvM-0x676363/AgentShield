@@ -152,6 +152,80 @@ if ! cmp -s "$settings" "$test_root/prior-settings.json" ||
     exit 1
 fi
 
+claude_home="$test_root/claude-profile"
+claude_receipts="$test_root/claude-receipts"
+mkdir -m 0700 "$claude_home" "$claude_home/.claude" "$claude_receipts"
+python3 - "$claude_home" <<'PY'
+import json
+import pathlib
+import sys
+
+home = pathlib.Path(sys.argv[1])
+fixtures = {
+    home / ".claude/settings.json": {
+        "permissions": {"deny": ["Read(user-owned)"], "ask": [], "allow": []},
+        "userSetting": True,
+    },
+    home / ".claude.json": {
+        "mcpServers": {"user-server": {"command": "user-tool"}},
+        "userSetting": True,
+    },
+}
+for path, value in fixtures.items():
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+cp "$claude_home/.claude/settings.json" "$test_root/prior-claude-settings.json"
+cp "$claude_home/.claude.json" "$test_root/prior-claude-mcp.json"
+claude_settings_mtime="$(python3 -c 'import os, sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$claude_home/.claude/settings.json")"
+claude_mcp_mtime="$(python3 -c 'import os, sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$claude_home/.claude.json")"
+export HOME="$claude_home"
+export XDG_CONFIG_HOME="$claude_home/.config"
+export GIT_CONFIG_GLOBAL="$claude_home/.gitconfig"
+if ! claude_install="$(bash "$repo/scripts/unix/install.sh" \
+    --only claude-code --skip-tools --skip-vscode \
+    --experimental-receipt-dir "$claude_receipts" 2>&1)"; then
+    printf '%s\n' "$claude_install" | tail -n 12 >&2
+    printf 'Evidence directory: %s\n' "$test_root" >&2
+    exit 1
+fi
+if [[ "$claude_install" != *'INSTALL DONE failed=0'* ]]; then
+    echo 'Existing Claude configuration install did not report success.' >&2
+    exit 1
+fi
+if ! claude_preview="$(python3 "$repo/scripts/rollback/rollback.py" --receipt-dir "$claude_receipts")"; then
+    echo 'Existing Claude configuration preview was blocked.' >&2
+    printf '%s\n' "$claude_preview" >&2
+    exit 1
+fi
+printf '%s\n' "$claude_preview" | python3 -c '
+import json, sys
+result = json.load(sys.stdin)
+kinds = {item.get("kind") for item in result.get("items", []) if item.get("status") == "ready"}
+if result.get("status") != "ready" or not {"json_list_append", "json_mcp_added_servers"} <= kinds:
+    sys.exit(1)
+' || { echo 'Claude and MCP inverse receipts were not ready.' >&2; exit 1; }
+if ! claude_result="$(python3 "$repo/scripts/rollback/rollback.py" --receipt-dir "$claude_receipts" --apply)"; then
+    echo 'Existing Claude configuration rollback failed.' >&2
+    printf '%s\n' "$claude_result" >&2
+    exit 1
+fi
+printf '%s\n' "$claude_result" | python3 -c '
+import json, sys
+result = json.load(sys.stdin)
+if result.get("status") != "restored" or result.get("applied") != result.get("receipts"):
+    sys.exit(1)
+' || { echo 'Claude configuration batch rollback was incomplete.' >&2; exit 1; }
+if ! cmp -s "$claude_home/.claude/settings.json" "$test_root/prior-claude-settings.json" ||
+   ! cmp -s "$claude_home/.claude.json" "$test_root/prior-claude-mcp.json" ||
+   [[ "$(python3 -c 'import os, sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$claude_home/.claude/settings.json")" != "$claude_settings_mtime" ]] ||
+   [[ "$(python3 -c 'import os, sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$claude_home/.claude.json")" != "$claude_mcp_mtime" ]]; then
+    echo 'Existing Claude configuration or timestamp was not restored.' >&2
+    exit 1
+fi
+export HOME="$test_home"
+export XDG_CONFIG_HOME="$test_home/.config"
+export GIT_CONFIG_GLOBAL="$test_home/.gitconfig"
+
 existing_file="$test_home/.claude/vendor-claude-code.md"
 printf 'pre-existing user file\n' > "$existing_file"
 manual_receipt_dir="$test_root/manual-receipts"
@@ -205,5 +279,6 @@ fi
 
 printf 'RESULT: Unix isolated install and rollback passed (receipts=%s)\n' "$receipt_count"
 echo 'RESULT: Unix canonical VS Code JSON merge and rollback passed'
+echo 'RESULT: Unix existing Claude permissions and MCP merge and rollback passed'
 echo 'RESULT: Unix existing-file review blocked batch rollback'
 printf 'Evidence directory: %s\n' "$test_root"

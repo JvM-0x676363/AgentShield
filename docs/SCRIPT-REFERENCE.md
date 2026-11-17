@@ -129,7 +129,8 @@ from the source checkout. It runs the real installer with `-Only claude-code
 applies only a fully ready receipt set, then checks that created files and Git
 settings were removed. It also confirms that a pre-existing target file blocks
 batch rollback for manual review. It also merges and restores a canonical VS
-Code JSON file in an isolated profile. Run it without Administrator privileges. It
+Code JSON file, plus existing Claude permission and MCP JSON files in a second
+isolated profile. Run it without Administrator privileges. It
 retains its temporary directory for inspection.
 
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File
@@ -152,7 +153,8 @@ For a non-root Linux, WSL, or macOS source-checkout pilot, run
 `bash tests/rollback-install-unix.sh`. It uses a private temporary profile and
 receipt directory, requires a fully ready preview before applying rollback,
 checks that created files and Git settings were removed, verifies restoration
-of a canonical VS Code JSON file and its timestamp, and confirms that a
+of canonical VS Code JSON and existing Claude permission and MCP JSON files
+with their timestamps, and confirms that a
 pre-existing target file blocks batch rollback. It retains the temporary
 directory for inspection.
 
