@@ -9,12 +9,20 @@ if [[ $EUID -ne 0 ]]; then
     echo 'Run this isolated deploy test as root.' >&2
     exit 1
 fi
-test_user="${SUDO_USER:-}"
-if [[ -z "$test_user" || "$test_user" == root ]] || ! id "$test_user" >/dev/null 2>&1; then
-    echo 'Run with sudo from a normal user account.' >&2
+test_user_a="${AGENTSHIELD_TEST_USER_A:-${SUDO_USER:-}}"
+test_user_b="${AGENTSHIELD_TEST_USER_B:-$test_user_a}"
+for test_user in "$test_user_a" "$test_user_b"; do
+    if [[ -z "$test_user" || "$test_user" == root ]] || ! id "$test_user" >/dev/null 2>&1; then
+        echo 'Run with sudo from a normal user account, or supply two existing test users.' >&2
+        exit 1
+    fi
+done
+if [[ "$test_user_a" != "$test_user_b" && "$(id -u "$test_user_a")" == "$(id -u "$test_user_b")" ]]; then
+    echo 'Distinct test users must have distinct UIDs.' >&2
     exit 1
 fi
 test_root="$(mktemp -d /tmp/agentshield-rollback-deploy.XXXXXXXX)"
+chmod 711 "$test_root"
 
 make_fixture_copy() {
     local copy="$1"
@@ -73,15 +81,72 @@ if len(seen) != len(homes):
 PY
 }
 
+check_account_isolation() {
+    [[ "$test_user_a" != "$test_user_b" ]] || return 0
+    python3 - "$home_a" "$home_b" "$receipts" "$test_user_a" "$test_user_b" <<'PY'
+import os
+import pathlib
+import pwd
+import sys
+
+home_a, home_b, receipts = map(pathlib.Path, sys.argv[1:4])
+users = [pwd.getpwnam(name) for name in sys.argv[4:6]]
+homes = [home_a, home_b]
+files = [
+    [home / ".git-hooks" / "pre-commit", home / ".gitconfig",
+     home / ".claude" / "vendor-claude-code.md"]
+    for home in homes
+]
+for account, home, paths in zip(users, homes, files):
+    if home.stat().st_uid != account.pw_uid or any(
+        path.stat().st_uid != account.pw_uid for path in paths
+    ):
+        raise SystemExit("fixture_ownership_incorrect")
+
+def can_access(account, path):
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.setgroups([])
+            os.setgid(account.pw_gid)
+            os.setuid(account.pw_uid)
+            if path.is_dir():
+                os.listdir(path)
+            else:
+                with open(path, "rb"):
+                    pass
+        except OSError:
+            os._exit(1)
+        os._exit(0)
+    _, status = os.waitpid(pid, 0)
+    return os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+
+for index, account in enumerate(users):
+    for path in files[index]:
+        if not can_access(account, path):
+            raise SystemExit("own_profile_unreadable")
+    for path in files[1 - index]:
+        if can_access(account, path):
+            raise SystemExit("cross_profile_read_allowed")
+    if can_access(account, receipts):
+        raise SystemExit("receipt_directory_read_allowed")
+print("RESULT: Unix distinct-UID ownership and access checks passed")
+PY
+}
+
 for scenario in ready review; do
     scenario_root="$test_root/$scenario"
     home_a="$scenario_root/profile-a"
     home_b="$scenario_root/profile-b"
     receipts="$scenario_root/receipts"
     mkdir -p "$home_a" "$home_b" "$receipts"
+    chmod 711 "$scenario_root"
+    chmod 700 "$home_a" "$home_b"
+    chown "$test_user_a" "$home_a"
+    chown "$test_user_b" "$home_b"
     chmod 700 "$receipts"
     profile_file="$scenario_root/profiles.txt"
-    printf '%s:%s\n%s:%s\n' "$test_user" "$home_a" "$test_user" "$home_b" > "$profile_file"
+    printf '%s:%s\n%s:%s\n' "$test_user_a" "$home_a" "$test_user_b" "$home_b" > "$profile_file"
     if [[ "$scenario" == review ]]; then
         mkdir -p "$home_b/.claude"
         printf 'user-owned fixture\n' > "$home_b/.claude/vendor-claude-code.md"
@@ -94,6 +159,7 @@ for scenario in ready review; do
         --experimental-receipt-dir "$receipts" --output-mode Json > "$deploy_output"
     check_deploy_result < "$deploy_output"
     check_receipts "$receipts" "$home_a" "$home_b"
+    check_account_isolation
     preview="$(bash "$rollback" --receipt-dir "$receipts")" || preview_code=$?
     preview_code="${preview_code:-0}"
     if [[ "$scenario" == ready ]]; then

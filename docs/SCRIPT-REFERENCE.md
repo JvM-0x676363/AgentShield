@@ -173,6 +173,22 @@ The two paths share one test OS identity. These pilots verify profile-path
 isolation, not ACL or ownership separation between distinct accounts. They
 retain their evidence directories for inspection and do not exercise macOS.
 
+For a Linux test with two distinct UIDs in Docker under WSL, use a locally
+cached image containing Bash, Python 3, Git, `useradd`, and coreutils:
+
+```bash
+docker image ls --format '{{.Repository}}:{{.Tag}}'
+bash tests/rollback-deploy-linux-docker.sh --image python:3.13.18-bookworm
+```
+
+The wrapper refuses to pull an image, disables container networking, mounts
+the checkout read-only, and removes the container at exit. It creates two
+disposable accounts inside the container and checks file ownership, each
+account's access to its own profile, denial of cross-profile reads, and denial
+of receipt-directory access. It then runs the same clean and blocked batch
+rollback scenarios. The fixture evidence exists only until the container is
+removed. This test does not exercise host user accounts or macOS.
+
 `-Only` filters AI configuration only. Git hooks, scanner tools, and VS Code
 extensions remain separate layers controlled by their dedicated flags.
 
