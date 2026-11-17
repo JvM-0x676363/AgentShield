@@ -240,6 +240,39 @@ try {
         (Test-Path -LiteralPath $previewFile)) {
         throw 'batch_apply_failed'
     }
+    $partialRoot = Join-Path $testRoot 'partial-runner'
+    $partialScripts = Join-Path $partialRoot 'scripts/windows'
+    $partialLib = Join-Path $partialRoot 'lib'
+    New-Item -ItemType Directory -Path $partialScripts, $partialLib -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repo 'lib/RollbackReceipt.ps1') -Destination $partialLib
+    $partialRunner = Join-Path $partialScripts 'rollback.ps1'
+    $source = [IO.File]::ReadAllText($rollback)
+    $declaration = 'param([string]$Receipt, [string]$ReceiptDir, [switch]$Apply)'
+    if (-not $source.StartsWith($declaration, [StringComparison]::Ordinal)) {
+        throw 'partial_fixture_source_changed'
+    }
+    $injected = @'
+if ($Receipt -and $Apply) {
+    @{ schema_version = 1; runner = 'rollback'; status = 'partial';
+       reason = 'known_prior_partial_restore'; exit_code = 2 } | ConvertTo-Json -Compress
+    exit 2
+}
+'@
+    [IO.File]::WriteAllText($partialRunner,
+        $source.Insert($declaration.Length, "`r`n" + $injected + "`r`n"))
+    $partialDir = Join-Path $testRoot 'partial-receipts'
+    New-PrivateTestDirectory -Path $partialDir
+    $partialFile = Join-Path $testRoot 'partial.txt'
+    [IO.File]::WriteAllBytes($partialFile, $content)
+    Write-AgentShieldCreatedReceipt -Destination $partialFile -InstalledBytes $content `
+        -ReceiptDir $partialDir | Out-Null
+    $partialRun = & powershell -NoProfile -File $partialRunner -ReceiptDir $partialDir -Apply |
+        ConvertFrom-Json
+    if ($LASTEXITCODE -ne 2 -or $partialRun.status -ne 'partial' -or
+        $partialRun.applied -ne 0 -or $partialRun.blocked -ne 1 -or
+        $partialRun.items[0].status -ne 'partial') {
+        throw 'batch_child_partial_not_reported'
+    }
     $conflictDir = Join-Path $testRoot 'conflict-receipts'
     New-PrivateTestDirectory -Path $conflictDir
     $conflictFile = Join-Path $testRoot 'conflict.txt'

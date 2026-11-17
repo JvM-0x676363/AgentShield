@@ -68,6 +68,7 @@ if ($ReceiptDir -or -not $Receipt) {
         }
         $ready = @($items | Where-Object { $_.status -eq 'ready' }).Count
         $applied = 0
+        $partialAttempt = $false
         $code = $(if ($ready -eq $items.Count) { 0 } else { 2 })
         if ($Apply -and $code -eq 0) {
             $currentNames = @(Get-ChildItem -LiteralPath $ReceiptDir -Force -ErrorAction Stop |
@@ -76,6 +77,7 @@ if ($ReceiptDir -or -not $Receipt) {
                 throw 'receipt_directory_changed'
             }
             foreach ($record in @($prepared | Sort-Object Priority, Id)) {
+                $result = $null
                 try {
                     Assert-AgentShieldPrivateReceiptPath -LiteralPath $record.Path
                     if ((Get-FileHash -LiteralPath $record.Path -Algorithm SHA256).Hash -cne $record.Digest) {
@@ -91,7 +93,8 @@ if ($ReceiptDir -or -not $Receipt) {
                     $ready--
                     $applied++
                 } catch {
-                    $items[$record.Index]['status'] = 'blocked'
+                    $partialAttempt = $null -ne $result -and $result.status -eq 'partial'
+                    $items[$record.Index]['status'] = $(if ($partialAttempt) { 'partial' } else { 'blocked' })
                     $items[$record.Index]['reason'] = 'receipt_apply_failed'
                     $ready--
                     $code = 2
@@ -99,11 +102,11 @@ if ($ReceiptDir -or -not $Receipt) {
                 }
             }
         }
-        $blocked = @($items | Where-Object { $_.status -eq 'blocked' -or $_.status -eq 'preview_only' }).Count
+        $blocked = @($items | Where-Object { $_.status -in @('blocked', 'preview_only', 'partial') }).Count
         [ordered]@{
             schema_version = 1; runner = $(if ($Apply) { 'rollback' } else { 'rollback-preview' })
             status = $(if ($code -eq 0) { if ($Apply) { 'restored' } else { 'ready' } }
-                elseif ($applied -gt 0) { 'partial' } else { 'blocked' })
+                elseif ($applied -gt 0 -or $partialAttempt) { 'partial' } else { 'blocked' })
             dry_run = -not [bool]$Apply; receipts = $items.Count; ready = $ready
             blocked = $blocked; applied = $applied; items = $items; exit_code = $code
         } | ConvertTo-Json -Compress -Depth 5
