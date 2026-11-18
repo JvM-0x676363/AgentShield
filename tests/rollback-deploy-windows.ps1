@@ -5,6 +5,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $repo 'scripts\windows\deploy.ps1'
 $rollback = Join-Path $repo 'scripts\windows\rollback.ps1'
 $testRoot = Join-Path $repo ('tmp\rollback-deploy-windows-' + [Guid]::NewGuid().ToString('N'))
+$claudePayloadRelative = '.claude\security-review-playbook.md'
 
 function New-PrivateReceiptDirectory {
     param([string]$Path)
@@ -145,6 +146,12 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 if (-not (Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue)) {
     throw 'Git for Windows is required in PATH for this deploy and rollback fixture.'
 }
+$claudeManifest = Get-Content -LiteralPath (Join-Path $repo 'targets\claude-code.json') -Raw |
+    ConvertFrom-Json
+$claudeDestinations = @($claudeManifest.files | ForEach-Object { $_.dest.windows })
+if ($claudeDestinations -notcontains '${HOME}/.claude/security-review-playbook.md') {
+    throw 'Claude fixture payload path no longer matches the target manifest.'
+}
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 
 foreach ($scenario in @('ready', 'review')) {
@@ -160,7 +167,7 @@ foreach ($scenario in @('ready', 'review')) {
         }
     }
     if ($scenario -eq 'review') {
-        $existing = Join-Path $homes[1] '.claude\vendor-claude-code.md'
+        $existing = Join-Path $homes[1] $claudePayloadRelative
         New-Item -ItemType Directory -Path (Split-Path -Parent $existing) -Force | Out-Null
         [IO.File]::WriteAllText($existing, "user-owned fixture`n")
     }
@@ -185,7 +192,7 @@ foreach ($scenario in @('ready', 'review')) {
     if ($DistinctSidAcl) {
         for ($index = 0; $index -lt $homes.Count; $index++) {
             $otherIndex = 1 - $index
-            foreach ($relative in @('', '.git-hooks\pre-commit', '.claude\vendor-claude-code.md')) {
+            foreach ($relative in @('', '.git-hooks\pre-commit', $claudePayloadRelative)) {
                 $path = if ($relative) { Join-Path $homes[$index] $relative } else { $homes[$index] }
                 Assert-ProfileAcl -Path $path -TargetSid $testSids[$index] `
                     -OtherSid $testSids[$otherIndex] -RequireFull:([bool]$relative)
@@ -203,7 +210,7 @@ foreach ($scenario in @('ready', 'review')) {
         if ($LASTEXITCODE -ne 0 -or $result.status -ne 'restored' -or
             $result.applied -ne $preview.receipts) { throw 'multi_profile_rollback_failed' }
         foreach ($profilePath in $homes) {
-            foreach ($relative in @('.git-hooks\pre-commit', '.claude\vendor-claude-code.md')) {
+            foreach ($relative in @('.git-hooks\pre-commit', $claudePayloadRelative)) {
                 if (Test-Path -LiteralPath (Join-Path $profilePath $relative)) {
                     throw 'fixture_file_survived_rollback'
                 }
