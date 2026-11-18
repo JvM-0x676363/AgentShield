@@ -26,6 +26,16 @@ review leaves the action blocked. If the approval helper fails to start, an
 administrator must repair it. AgentShield does not grant broad `.git` writes
 or unsandboxed Git execution to work around that failure.
 
+To opt in on Windows, Linux, or macOS, select **Approve for me** in the Codex
+desktop permissions control. In the CLI, start a session with
+`codex -c approvals_reviewer=auto_review`. Keep the managed
+`security_workspace` profile and interactive `on-request` approval policy.
+The reviewer sees all eligible approval requests in that session, not only
+Git requests; it may deny a request or fail closed. This option uses additional
+model calls. If **Approve for me** is unavailable, check the organization
+policy and client support before changing configuration. AgentShield does not
+write the developer's `~/.codex/config.toml` or force this setting fleet-wide.
+
 The remaining command gates deserve separate review:
 
 - `git push`, `git clone`, `git fetch` and remote changes can use the network.
@@ -42,4 +52,5 @@ The remaining command gates deserve separate review:
 Sources: [Claude permission precedence](https://code.claude.com/docs/en/settings),
 [Claude sandbox platform coverage](https://code.claude.com/docs/en/sandboxing),
 [Codex protected paths and Auto-review](https://learn.chatgpt.com/docs/agent-approvals-security),
+[Codex Auto-review setup](https://learn.chatgpt.com/docs/sandboxing/auto-review),
 [Codex permission profiles](https://learn.chatgpt.com/docs/permissions).
