@@ -24,6 +24,27 @@ full-line regex check does not establish that a flag after the commit message
 is denied. Its commit rules remain in Ask until a CLI pilot confirms the
 matching on each supported OS. CI and pull request review remain necessary.
 
+### Antigravity CLI pilot
+
+Use a disposable Git repository and a dedicated test profile. Record the CLI
+version, OS, active permission mode, and the exact `permissions` lists visible
+through `/permissions`. Ask the agent to run each command below exactly as
+written. Decline every approval prompt; the fixture should have no remote.
+
+| Command requested | Required observation |
+|---|---|
+| `git status` and `git add sample.txt` | Run without an approval prompt |
+| `git commit -m pilot` | Ask before execution |
+| `git commit -m pilot --no-verify` and `git commit -m pilot -n` | Deny or Ask before execution; never run automatically |
+| `git commit -m pilot --amend` | Ask before execution |
+| `git push` | Ask before execution; the fixture has no remote |
+
+Save the permission decision and whether Git changed the fixture after each
+case. A transcript that only shows the agent saying it was blocked is not
+evidence of the permission decision. Repeat on Windows, Linux, and macOS before
+changing Antigravity commit from Ask to Allow. The official CLI docs describe
+interactive approval cards but no standalone permission-rule test command.
+
 Codex's managed `security_workspace` profile extends `:workspace`, which
 protects `.git` as read-only. Unix managed defaults already allow `git add`
 outside the sandbox. A Codex command rule set to `allow` for `git commit` would
