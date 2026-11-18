@@ -1,8 +1,11 @@
+param([switch]$DistinctSidAcl)
+
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $repo 'scripts\windows\deploy.ps1'
 $rollback = Join-Path $repo 'scripts\windows\rollback.ps1'
 $testRoot = Join-Path $repo ('tmp\rollback-deploy-windows-' + [Guid]::NewGuid().ToString('N'))
+$claudePayloadRelative = '.claude\security-review-playbook.md'
 
 function New-PrivateReceiptDirectory {
     param([string]$Path)
@@ -22,6 +25,58 @@ function New-PrivateReceiptDirectory {
         [void]$acl.AddAccessRule($rule)
     }
     Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function New-PrivateProfileDirectory {
+    param([string]$Path, [string]$TargetSid)
+    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetOwner($current)
+    $acl.SetAccessRuleProtection($true, $false)
+    $flags = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+             [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    foreach ($sidValue in @($current.Value, 'S-1-5-18', 'S-1-5-32-544')) {
+        $sid = [Security.Principal.SecurityIdentifier]::new($sidValue)
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+            $sid, [Security.AccessControl.FileSystemRights]::FullControl, $flags,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Allow)
+        [void]$acl.AddAccessRule($rule)
+    }
+    $target = [Security.Principal.SecurityIdentifier]::new($TargetSid)
+    $traverse = [Security.AccessControl.FileSystemAccessRule]::new(
+        $target, [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+        [Security.AccessControl.InheritanceFlags]::None,
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Allow)
+    [void]$acl.AddAccessRule($traverse)
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Assert-ProfileAcl {
+    param([string]$Path, [string]$TargetSid, [string]$OtherSid,
+          [switch]$RequireFull)
+    $acl = Get-Acl -LiteralPath $Path
+    $allowed = @($acl.Access | Where-Object {
+        $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow
+    })
+    $targetRules = @($allowed | Where-Object {
+        $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq $TargetSid
+    })
+    $otherRules = @($allowed | Where-Object {
+        $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -eq $OtherSid
+    })
+    if (-not $RequireFull -and -not $acl.AreAccessRulesProtected) {
+        throw "profile_acl_inheritance_enabled: $Path"
+    }
+    if (-not $targetRules.Count -or $otherRules.Count) {
+        throw "profile_acl_mismatch: $Path"
+    }
+    if ($RequireFull -and -not @($targetRules | Where-Object {
+        ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq
+            [Security.AccessControl.FileSystemRights]::FullControl
+    }).Count) { throw "profile_owner_grant_missing: $Path" }
 }
 
 function New-FixtureDeployScript {
@@ -88,22 +143,45 @@ $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Run this isolated deploy test from an elevated PowerShell session.'
 }
+if (-not (Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue)) {
+    throw 'Git for Windows is required in PATH for this deploy and rollback fixture.'
+}
+$claudeManifest = Get-Content -LiteralPath (Join-Path $repo 'targets\claude-code.json') -Raw |
+    ConvertFrom-Json
+$claudeDestinations = @($claudeManifest.files | ForEach-Object { $_.dest.windows })
+if ($claudeDestinations -notcontains '${HOME}/.claude/security-review-playbook.md') {
+    throw 'Claude fixture payload path no longer matches the target manifest.'
+}
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 
 foreach ($scenario in @('ready', 'review')) {
     $scenarioRoot = Join-Path $testRoot $scenario
     New-Item -ItemType Directory -Path $scenarioRoot -Force | Out-Null
     $homes = @((Join-Path $scenarioRoot 'profile-a'), (Join-Path $scenarioRoot 'profile-b'))
-    foreach ($profilePath in $homes) { New-Item -ItemType Directory -Path $profilePath -Force | Out-Null }
+    $testSids = @('S-1-5-19', 'S-1-5-20')
+    for ($index = 0; $index -lt $homes.Count; $index++) {
+        if ($DistinctSidAcl) {
+            New-PrivateProfileDirectory -Path $homes[$index] -TargetSid $testSids[$index]
+        } else {
+            New-Item -ItemType Directory -Path $homes[$index] -Force | Out-Null
+        }
+    }
     if ($scenario -eq 'review') {
-        $existing = Join-Path $homes[1] '.claude\vendor-claude-code.md'
+        $existing = Join-Path $homes[1] $claudePayloadRelative
         New-Item -ItemType Directory -Path (Split-Path -Parent $existing) -Force | Out-Null
         [IO.File]::WriteAllText($existing, "user-owned fixture`n")
     }
-    $profiles = @(
-        [ordered]@{ Username = $identity.Name; Principal = $identity.Name; Profile = $homes[0] },
-        [ordered]@{ Username = $identity.Name; Principal = $identity.Name; Profile = $homes[1] }
-    )
+    if ($DistinctSidAcl) {
+        $profiles = @(
+            [ordered]@{ Username = ('*' + $testSids[0]); Principal = $testSids[0]; Profile = $homes[0] },
+            [ordered]@{ Username = ('*' + $testSids[1]); Principal = $testSids[1]; Profile = $homes[1] }
+        )
+    } else {
+        $profiles = @(
+            [ordered]@{ Username = $identity.Name; Principal = $identity.Name; Profile = $homes[0] },
+            [ordered]@{ Username = $identity.Name; Principal = $identity.Name; Profile = $homes[1] }
+        )
+    }
     $deployCopy = Join-Path $scenarioRoot 'deploy.fixture.ps1'
     $receiptDir = Join-Path $scenarioRoot 'receipts'
     New-PrivateReceiptDirectory -Path $receiptDir
@@ -111,6 +189,17 @@ foreach ($scenario in @('ready', 'review')) {
     Invoke-FixtureDeploy -Path $deployCopy -ReceiptDir $receiptDir `
         -LogPath (Join-Path $scenarioRoot 'deploy.log') -ExpectedOk 2
     Assert-ReceiptProfiles -ReceiptDir $receiptDir -Homes $homes
+    if ($DistinctSidAcl) {
+        for ($index = 0; $index -lt $homes.Count; $index++) {
+            $otherIndex = 1 - $index
+            foreach ($relative in @('', '.git-hooks\pre-commit', $claudePayloadRelative)) {
+                $path = if ($relative) { Join-Path $homes[$index] $relative } else { $homes[$index] }
+                Assert-ProfileAcl -Path $path -TargetSid $testSids[$index] `
+                    -OtherSid $testSids[$otherIndex] -RequireFull:([bool]$relative)
+            }
+        }
+        Write-Output 'RESULT: Windows distinct-SID fixture ACL grants are separated'
+    }
     $preview = & powershell -NoProfile -File $rollback -ReceiptDir $receiptDir | ConvertFrom-Json
     $previewCode = $LASTEXITCODE
     if ($scenario -eq 'ready') {
@@ -121,7 +210,7 @@ foreach ($scenario in @('ready', 'review')) {
         if ($LASTEXITCODE -ne 0 -or $result.status -ne 'restored' -or
             $result.applied -ne $preview.receipts) { throw 'multi_profile_rollback_failed' }
         foreach ($profilePath in $homes) {
-            foreach ($relative in @('.git-hooks\pre-commit', '.claude\vendor-claude-code.md')) {
+            foreach ($relative in @('.git-hooks\pre-commit', $claudePayloadRelative)) {
                 if (Test-Path -LiteralPath (Join-Path $profilePath $relative)) {
                     throw 'fixture_file_survived_rollback'
                 }
