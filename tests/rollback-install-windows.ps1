@@ -64,7 +64,7 @@ try {
         $installOutput | Select-Object -Last 8 | ForEach-Object { Write-Warning $_ }
         throw 'isolated_install_failed'
     }
-    foreach ($relative in @('.claude\vendor-claude-code.md', '.git-hooks\pre-commit',
+    foreach ($relative in @('.claude\security-review-playbook.md', '.git-hooks\pre-commit',
             '.git-hooks\agent-shield-scan.py', '.git-template\hooks\pre-commit')) {
         if (-not (Test-Path -LiteralPath (Join-Path $testHome $relative) -PathType Leaf)) {
             throw 'expected_install_file_missing'
@@ -80,7 +80,7 @@ try {
         $result.applied -ne $preview.receipts) {
         throw 'isolated_rollback_apply_failed'
     }
-    foreach ($relative in @('.claude\vendor-claude-code.md', '.git-hooks\pre-commit',
+    foreach ($relative in @('.claude\security-review-playbook.md', '.git-hooks\pre-commit',
             '.git-hooks\agent-shield-scan.py', '.git-template\hooks\pre-commit')) {
         if (Test-Path -LiteralPath (Join-Path $testHome $relative)) {
             throw 'created_file_survived_rollback'
@@ -193,7 +193,7 @@ try {
     $env:HOMEDRIVE = [IO.Path]::GetPathRoot($testHome).TrimEnd('\')
     $env:HOMEPATH = $testHome.Substring($env:HOMEDRIVE.Length)
     $env:GIT_CONFIG_GLOBAL = Join-Path $testHome '.gitconfig'
-    $existingFile = Join-Path $testHome '.claude\vendor-claude-code.md'
+    $existingFile = Join-Path $testHome '.claude\security-review-playbook.md'
     [IO.File]::WriteAllText($existingFile, 'pre-existing user file')
     $manualReceiptDir = Join-Path $testRoot 'manual-receipts'
     New-PrivateReceiptDirectory -Path $manualReceiptDir
@@ -221,10 +221,48 @@ try {
         -not (Test-Path -LiteralPath (Join-Path $testHome '.git-hooks\pre-commit'))) {
         throw 'existing_file_batch_was_applied'
     }
+    $manualItems = @($manualPreview.items | Where-Object { $_.status -eq 'preview_only' })
+    $readyItems = @($manualPreview.items | Where-Object { $_.status -eq 'ready' })
+    if ($manualItems.Count -ne 1 -or $manualItems[0].kind -ne 'manual_review' -or
+        $manualItems[0].reason -ne 'existing_target_has_no_inverse' -or
+        $readyItems.Count -lt 1 -or
+        @($readyItems | Where-Object { $_.kind -eq 'git_config_pair' }).Count -ne 1) {
+        throw 'mixed_receipt_set_unexpected'
+    }
+    $appliedReady = 0
+    foreach ($item in @($readyItems | Sort-Object @{ Expression = {
+        if ($_.kind -eq 'git_config_pair') { 0 } else { 1 }
+    } }, id)) {
+        if ([string]$item.id -cnotmatch '^[0-9a-f]{32}$') { throw 'invalid_ready_receipt_id' }
+        $receiptPath = Join-Path $manualReceiptDir ($item.id + '.json')
+        $singlePreview = & powershell -NoProfile -File $rollback -Receipt $receiptPath | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0 -or $singlePreview.status -ne 'ready') {
+            throw 'individual_mixed_preview_failed'
+        }
+        $singleResult = & powershell -NoProfile -File $rollback -Receipt $receiptPath -Apply |
+            ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0 -or $singleResult.status -notin @('removed', 'restored')) {
+            throw 'individual_mixed_apply_failed'
+        }
+        $appliedReady++
+    }
+    if ($appliedReady -ne $readyItems.Count -or
+        [IO.File]::ReadAllText($existingFile) -cne $installedContent -or
+        -not (Test-Path -LiteralPath (Join-Path $manualReceiptDir ($manualItems[0].id + '.json'))) -or
+        (Test-Path -LiteralPath (Join-Path $testHome '.git-hooks\pre-commit'))) {
+        throw 'mixed_recovery_changed_manual_target'
+    }
+    foreach ($key in @('core.hooksPath', 'init.templateDir')) {
+        $value = @(& git config --file (Join-Path $testHome '.gitconfig') --get-all $key 2>$null)
+        if ($LASTEXITCODE -eq 0 -or $value.Count -ne 0) {
+            throw 'mixed_recovery_git_config_survived'
+        }
+    }
     Write-Host "RESULT: Windows isolated install and rollback passed (receipts=$($preview.receipts))"
     Write-Host 'RESULT: Windows canonical VS Code JSON merge and rollback passed'
     Write-Host 'RESULT: Windows existing Claude permissions and MCP merge and rollback passed'
     Write-Host 'RESULT: Windows existing-file review blocked batch rollback'
+    Write-Host "RESULT: Windows ready receipts recovered individually; manual review retained (applied=$appliedReady)"
     Write-Host "Evidence directory: $testRoot"
 } finally {
     foreach ($name in $environmentNames) {
