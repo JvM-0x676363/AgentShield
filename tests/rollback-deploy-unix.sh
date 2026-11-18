@@ -94,7 +94,7 @@ users = [pwd.getpwnam(name) for name in sys.argv[4:6]]
 homes = [home_a, home_b]
 files = [
     [home / ".git-hooks" / "pre-commit", home / ".gitconfig",
-     home / ".claude" / "vendor-claude-code.md"]
+     home / ".claude" / "security-review-playbook.md"]
     for home in homes
 ]
 for account, home, paths in zip(users, homes, files):
@@ -149,7 +149,7 @@ for scenario in ready review; do
     printf '%s:%s\n%s:%s\n' "$test_user_a" "$home_a" "$test_user_b" "$home_b" > "$profile_file"
     if [[ "$scenario" == review ]]; then
         mkdir -p "$home_b/.claude"
-        printf 'user-owned fixture\n' > "$home_b/.claude/vendor-claude-code.md"
+        printf 'user-owned fixture\n' > "$home_b/.claude/security-review-playbook.md"
     fi
     fixture="$scenario_root/deploy.fixture.sh"
     make_fixture_copy "$fixture"
@@ -168,7 +168,7 @@ for scenario in ready review; do
         result="$(bash "$rollback" --receipt-dir "$receipts" --apply)"
         python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["status"]=="restored" and r["applied"]==int(sys.argv[1])' "$receipt_count" <<< "$result"
         for home in "$home_a" "$home_b"; do
-            [[ ! -e "$home/.git-hooks/pre-commit" && ! -e "$home/.claude/vendor-claude-code.md" ]] || {
+            [[ ! -e "$home/.git-hooks/pre-commit" && ! -e "$home/.claude/security-review-playbook.md" ]] || {
                 echo 'fixture_file_survived_rollback' >&2; exit 1;
             }
         done

@@ -125,6 +125,16 @@ run and reports how many receipts were already applied. Keep the receipt
 directory for operator review; this remains a partial rollback, not a complete
 uninstall.
 
+When batch preview is blocked by `manual_review`, keep its receipts and
+resolve the affected destinations from a verified earlier copy or another
+documented recovery source. After reviewing every item, the operator can
+preview and apply each `ready` receipt individually with `-Receipt <file>` on
+Windows or `--receipt <file>` on Unix. Recheck each individual preview before
+apply, restore the Git configuration pair before removing newly created hook
+files, and stop on the first failure. Do not remove or rewrite blocked
+receipts to make the batch appear ready. The isolated install tests exercise
+this mixed recovery path while retaining the manual-review receipt.
+
 For an end-to-end Windows pilot without changing the current user profile, run
 `powershell -NoProfile -ExecutionPolicy Bypass -File tests/rollback-install-windows.ps1`
 from the source checkout. It runs the real installer with `-Only claude-code
@@ -133,8 +143,9 @@ applies only a fully ready receipt set, then checks that created files and Git
 settings were removed. It also confirms that a pre-existing target file blocks
 batch rollback for manual review. It also merges and restores a canonical VS
 Code JSON file, plus existing Claude permission and MCP JSON files in a second
-isolated profile. Run it without Administrator privileges. It
-retains its temporary directory for inspection.
+isolated profile. In the blocked scenario, it applies ready receipts one at a
+time and confirms the manual-review file and receipt remain. Run it without
+Administrator privileges. It retains its temporary directory for inspection.
 
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File
 tests/rollback-managed-windows.ps1` exercises copies of the Claude and Codex
@@ -159,7 +170,8 @@ checks that created files and Git settings were removed, verifies restoration
 of canonical VS Code JSON and existing Claude permission and MCP JSON files
 with their timestamps, and confirms that a
 pre-existing target file blocks batch rollback. It retains the temporary
-directory for inspection.
+directory for inspection. In the blocked scenario, it applies ready receipts
+one at a time and confirms the manual-review file and receipt remain.
 
 For an isolated fleet-deploy pilot, run `powershell -NoProfile
 -ExecutionPolicy Bypass -File tests/rollback-deploy-windows.ps1` from an elevated

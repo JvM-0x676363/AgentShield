@@ -40,7 +40,7 @@ if [[ "$install_output" != *'INSTALL DONE failed=0'* ||
     exit 1
 fi
 
-for relative in .claude/vendor-claude-code.md .git-hooks/pre-commit \
+for relative in .claude/security-review-playbook.md .git-hooks/pre-commit \
     .git-hooks/agent-shield-scan.py .git-template/hooks/pre-commit; do
     if [[ ! -f "$test_home/$relative" ]]; then
         echo 'Expected installed file is missing.' >&2
@@ -87,7 +87,7 @@ if result.get("status") != "restored" or result.get("applied") != expected:
     exit 1
 }
 
-for relative in .claude/vendor-claude-code.md .git-hooks/pre-commit \
+for relative in .claude/security-review-playbook.md .git-hooks/pre-commit \
     .git-hooks/agent-shield-scan.py .git-template/hooks/pre-commit; do
     if [[ -e "$test_home/$relative" ]]; then
         echo 'A created file survived rollback.' >&2
@@ -226,7 +226,7 @@ export HOME="$test_home"
 export XDG_CONFIG_HOME="$test_home/.config"
 export GIT_CONFIG_GLOBAL="$test_home/.gitconfig"
 
-existing_file="$test_home/.claude/vendor-claude-code.md"
+existing_file="$test_home/.claude/security-review-playbook.md"
 printf 'pre-existing user file\n' > "$existing_file"
 manual_receipt_dir="$test_root/manual-receipts"
 mkdir -m 0700 "$manual_receipt_dir"
@@ -277,8 +277,56 @@ if ! cmp -s "$existing_file" "$test_root/installed-existing.txt" ||
     exit 1
 fi
 
+ready_recovered="$(python3 - "$repo" "$manual_receipt_dir" <<'PY'
+import json
+import pathlib
+import re
+import subprocess
+import sys
+
+repo = pathlib.Path(sys.argv[1])
+receipt_dir = pathlib.Path(sys.argv[2])
+rollback = repo / "scripts/rollback/rollback.py"
+base = [sys.executable, str(rollback)]
+batch = subprocess.run(base + ["--receipt-dir", str(receipt_dir)], capture_output=True, text=True)
+report = json.loads(batch.stdout)
+manual = [item for item in report["items"] if item["status"] == "preview_only"]
+ready = [item for item in report["items"] if item["status"] == "ready"]
+if (batch.returncode != 2 or report["status"] != "blocked" or
+        len(manual) != 1 or manual[0]["kind"] != "manual_review" or
+        manual[0].get("reason") != "existing_target_has_no_inverse" or
+        not ready or sum(item["kind"] == "git_config_pair" for item in ready) != 1):
+    sys.exit("Unexpected mixed receipt set")
+for item in sorted(ready, key=lambda value: (value["kind"] != "git_config_pair", value["id"])):
+    if not re.fullmatch(r"[0-9a-f]{32}", item["id"]):
+        sys.exit("Invalid ready receipt ID")
+    receipt = receipt_dir / (item["id"] + ".json")
+    preview = subprocess.run(base + ["--receipt", str(receipt)], capture_output=True, text=True)
+    if preview.returncode != 0 or json.loads(preview.stdout)["status"] != "ready":
+        sys.exit("Individual mixed preview failed")
+    result = subprocess.run(base + ["--receipt", str(receipt), "--apply"], capture_output=True, text=True)
+    if result.returncode != 0 or json.loads(result.stdout)["status"] not in ("removed", "restored"):
+        sys.exit("Individual mixed apply failed")
+if not (receipt_dir / (manual[0]["id"] + ".json")).is_file():
+    sys.exit("Manual review receipt was removed")
+print(len(ready))
+PY
+)" || { echo 'Mixed receipt recovery failed.' >&2; exit 1; }
+if ! cmp -s "$existing_file" "$test_root/installed-existing.txt" ||
+   [[ -e "$test_home/.git-hooks/pre-commit" ]]; then
+    echo 'Mixed receipt recovery changed the manual target or retained a created hook.' >&2
+    exit 1
+fi
+for key in core.hooksPath init.templateDir; do
+    if git config --file "$test_home/.gitconfig" --get-all "$key" >/dev/null 2>&1; then
+        echo 'Mixed receipt recovery retained an installed Git setting.' >&2
+        exit 1
+    fi
+done
+
 printf 'RESULT: Unix isolated install and rollback passed (receipts=%s)\n' "$receipt_count"
 echo 'RESULT: Unix canonical VS Code JSON merge and rollback passed'
 echo 'RESULT: Unix existing Claude permissions and MCP merge and rollback passed'
 echo 'RESULT: Unix existing-file review blocked batch rollback'
+printf 'RESULT: Unix ready receipts recovered individually; manual review retained (applied=%s)\n' "$ready_recovered"
 printf 'Evidence directory: %s\n' "$test_root"
