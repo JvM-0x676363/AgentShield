@@ -12,38 +12,19 @@ deny the common `--no-verify` and `-n` forms and ask before `--amend`.
 |---|---|---|---|
 | Local status, diff, log | Allowed | Allowed | Runs within the selected profile |
 | Local add | Allowed | Allowed | Unix managed default allows it; Windows may require approval for `.git` write |
-| Local commit | Allowed | Approval required pending CLI pilot | Approval or Auto-review required for `.git` write |
+| Local commit | Allowed | Approval required | Approval or Auto-review required for `.git` write |
 | Push, destructive history and worktree changes | Approval or deny | Approval or deny | Approval or deny |
-| Hook bypass and force push patterns | Denied | Deny patterns; commit remains in Ask | Forbidden |
+| Hook bypass and force push patterns | Denied | Direct bypass deny; commits remain in Ask | Forbidden |
 
 Command permissions inspect command text, not Git's parsed arguments. The
 Claude patterns cover common bypass flags before or after a commit message, but
 these rules are not a complete integrity boundary for every shell spelling.
-Antigravity can match regexes token by token when it parses a command, so a
-full-line regex check does not establish that a flag after the commit message
-is denied. Its commit rules remain in Ask until a CLI pilot confirms the
-matching on each supported OS. CI and pull request review remain necessary.
-
-### Antigravity CLI pilot
-
-Use a disposable Git repository and a dedicated test profile. Record the CLI
-version, OS, active permission mode, and the exact `permissions` lists visible
-through `/permissions`. Ask the agent to run each command below exactly as
-written. Decline every approval prompt; the fixture should have no remote.
-
-| Command requested | Required observation |
-|---|---|
-| `git status` and `git add sample.txt` | Run without an approval prompt |
-| `git commit -m pilot` | Ask before execution |
-| `git commit -m pilot --no-verify` and `git commit -m pilot -n` | Deny or Ask before execution; never run automatically |
-| `git commit -m pilot --amend` | Ask before execution |
-| `git push` | Ask before execution; the fixture has no remote |
-
-Save the permission decision and whether Git changed the fixture after each
-case. A transcript that only shows the agent saying it was blocked is not
-evidence of the permission decision. Repeat on Windows, Linux, and macOS before
-changing Antigravity commit from Ask to Allow. The official CLI docs describe
-interactive approval cards but no standalone permission-rule test command.
+Antigravity can match regexes token by token when it parses a command. The
+pilot on CLI 1.5.11 did not establish that a rule would catch a bypass flag
+after the commit message: the agent refused the unsafe request before a tool
+call. AgentShield therefore keeps `git commit` in Ask and does not install the
+unverified regex rules. A future opt-in pilot is tracked in
+[the roadmap](roadmap.md). CI and pull request review remain necessary.
 
 Codex's managed `security_workspace` profile extends `:workspace`, which
 protects `.git` as read-only. Unix managed defaults already allow `git add`

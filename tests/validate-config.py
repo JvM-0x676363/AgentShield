@@ -571,8 +571,8 @@ for mid in ("claude-code", "claude-managed", "antigravity"):
         for frag in ("core.hooksPath", "no-verify", "push --force"):
             check(frag in txt, "  %s: guards git ('%s')" % (mid, frag))
 
-# Claude local commits avoid an approval prompt. Antigravity commits remain in
-# Ask pending a CLI pilot; Codex keeps approval because .git is protected.
+# Claude local commits avoid an approval prompt. Antigravity and Codex retain
+# approval for commits; Codex also protects .git in its workspace profile.
 for mid in ("claude-code", "claude-managed", "antigravity"):
     if mid not in manifests:
         continue
@@ -589,9 +589,10 @@ for mid in ("claude-code", "claude-managed", "antigravity"):
     if mid == "antigravity":
         check(commit_rule in permissions.get("ask", [])
               and commit_rule not in permissions.get("allow", [])
-              and "command(regex:git commit .*)" in permissions.get("ask", [])
-              and "command(regex:git commit .*)" not in permissions.get("allow", []),
-              "  antigravity: local commit remains in Ask pending CLI pilot")
+              and not any(rule.startswith("command(regex:git commit ")
+                          for bucket in ("allow", "ask", "deny")
+                          for rule in permissions.get(bucket, [])),
+              "  antigravity: local commit stays in Ask without unverified regex rules")
     else:
         check(commit_rule in permissions.get("allow", [])
               and commit_rule not in permissions.get("ask", []),
@@ -600,13 +601,7 @@ for mid in ("claude-code", "claude-managed", "antigravity"):
           "  %s: push still requires approval" % mid)
     check(bypass_rule in permissions.get("deny", []),
           "  %s: commit hook bypass remains denied" % mid)
-    if mid == "antigravity":
-        check("command(regex:git commit .*--no-verify.*)" in permissions.get("deny", [])
-              and "command(regex:git commit .*-n.*)" in permissions.get("deny", []),
-              "  antigravity: bypass patterns retained alongside commit Ask")
-        check("command(regex:git commit .*--amend.*)" in permissions.get("ask", []),
-              "  antigravity: amend pattern remains in Ask")
-    else:
+    if mid != "antigravity":
         deny_patterns = [rule[len("Bash("):-1] for rule in permissions.get("deny", [])]
         ask_patterns = [rule[len("Bash("):-1] for rule in permissions.get("ask", [])]
         def matches_wildcard(pattern, command):
