@@ -19,6 +19,7 @@ ONLY="all"   # default; overwritten by --only in parse below
 OUTPUT_MODE="Console"
 SKIP_TOOLS=false
 SKIP_VSCODE=false
+EXPERIMENTAL_RECEIPT_DIR=""
 
 # while + shift, NOT 'for arg in "$@"'. In a for loop, 'shift' modifies
 # positional parameters but does NOT advance the loop variable: '--only codex'
@@ -34,6 +35,8 @@ while [[ $# -gt 0 ]]; do
         --force)   FORCE=true ;;
         --skip-tools) SKIP_TOOLS=true ;;
         --skip-vscode) SKIP_VSCODE=true ;;
+        --experimental-receipt-dir) shift; EXPERIMENTAL_RECEIPT_DIR="${1:-}"
+                                    [[ -n "$EXPERIMENTAL_RECEIPT_DIR" ]] || { echo "[ERROR] --experimental-receipt-dir requires a value" >&2; exit 2; } ;;
         --output-mode) shift; OUTPUT_MODE="${1:-}"
                        [[ "$OUTPUT_MODE" =~ ^(Console|Json|Quiet)$ ]] || { echo "[ERROR] --output-mode must be Console, Json, or Quiet" >&2; exit 2; } ;;
         --only)    shift
@@ -42,7 +45,7 @@ while [[ $# -gt 0 ]]; do
         --only=*)  ONLY="${1#*=}" ;;
         --list-targets) exec "${PY:-python3}" "$SCRIPT_DIR/lib/apply_targets.py" \
                             --root "$SCRIPT_DIR" --list-targets ;;
-        -h|--help) echo "Usage: sudo bash deploy.sh [--dry-run] [--force] [--skip-tools] [--skip-vscode] [--output-mode Console|Json|Quiet] [--only <selectors>] [--list-targets]"; exit 0 ;;
+        -h|--help) echo "Usage: sudo bash deploy.sh [--dry-run] [--force] [--skip-tools] [--skip-vscode] [--output-mode Console|Json|Quiet] [--only <selectors>] [--list-targets] [--experimental-receipt-dir <absolute-dir>]"; exit 0 ;;
         *)         echo "[ERROR] unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -135,6 +138,18 @@ for _c in python3 python; do
 done
 MERGES_SKIPPED=0
 MACHINE_OK=0
+if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
+    if [[ ! -f "$SCRIPT_DIR/scripts/rollback/rollback.py" || ! -f "$SCRIPT_DIR/lib/git_config_receipt.py" ]]; then
+        error "--experimental-receipt-dir requires the source checkout with the rollback entry point"
+        exit 2
+    fi
+    if [[ -z "$PY" ]] || ! "$PY" -c 'import sys; sys.path.insert(0,sys.argv[1]); from rollback_receipt import assert_empty_private_directory; assert_empty_private_directory(sys.argv[2])' \
+        "$SCRIPT_DIR/lib" "$EXPERIMENTAL_RECEIPT_DIR" >/dev/null 2>&1; then
+        error "--experimental-receipt-dir requires an empty private absolute directory owned by this process"
+        exit 2
+    fi
+    warn "Experimental rollback is partial; existing files without an inverse require manual review."
+fi
 
 # JSON merge wrapper. Without valid python3: consume heredoc and PRESERVE existing
 # file. Overwriting developer config would be worse than not applying right now.
@@ -178,7 +193,7 @@ info "System: $OS"
 # --- Source file validation ---
 # Per-tool configuration lives in targets/*.json + policy/*. Only check roots:
 # the engine validates each manifest and each referenced payload_file/compose.
-for f in "lib/apply_targets.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit" "scripts/scan/agent_shield_scan.py" "rules/semgrep/agentshield-baseline.yml"; do
+for f in "lib/apply_targets.py" "lib/rollback_receipt.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit" "scripts/scan/agent_shield_scan.py" "rules/semgrep/agentshield-baseline.yml"; do
     [[ -f "$SCRIPT_DIR/$f" ]] || { error "File not found: $SCRIPT_DIR/$f"; exit 1; }
 done
 [[ -d "$SCRIPT_DIR/targets" ]] || { error "Directory not found: $SCRIPT_DIR/targets"; exit 1; }
@@ -370,6 +385,7 @@ install_for_user() {
     else
         local apply_args=(--root "$SCRIPT_DIR" --scope user --home "$home" --only "$ONLY")
         $DRY_RUN && apply_args+=(--dry-run)
+        [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]] && apply_args+=(--receipt-dir "$EXPERIMENTAL_RECEIPT_DIR")
         local apply_rc=0
         "$PY" "$SCRIPT_DIR/lib/apply_targets.py" "${apply_args[@]}" || apply_rc=$?
         # rc 3 = valid selection with no targets in this scope. With --only managed
@@ -408,6 +424,38 @@ install_for_user() {
     local pre_commit="$hooks_dir/pre-commit"
     local scanner_runner="$hooks_dir/agent-shield-scan.py"
     local scanner_rules="$hooks_dir/agent-shield-rules"
+    local -a created_hook_files=()
+    local -a created_hook_guards=()
+    local -a existing_hook_files=()
+    if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
+        local managed_file
+        for managed_file in "$pre_commit" "$scanner_runner" \
+            "$scanner_rules/agentshield-baseline.yml" "$template_dir/hooks/pre-commit"; do
+            if [[ -L "$managed_file" ]]; then
+                warn "    Experimental receipt mode refuses a symbolic-link destination"
+                return 1
+            fi
+            if [[ -e "$managed_file" ]]; then
+                [[ "$managed_file" == "$pre_commit" ]] || existing_hook_files+=("$managed_file")
+            else
+                local guard_id
+                guard_id=$("$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                    --provisional "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR") || {
+                    warn "    Could not create a provisional hook or scanner receipt"
+                    return 1
+                }
+                created_hook_files+=("$managed_file")
+                created_hook_guards+=("$guard_id")
+            fi
+        done
+        for managed_file in "${existing_hook_files[@]}"; do
+            if ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                --manual-review "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+                warn "    Could not mark an existing hook or scanner file for manual rollback review"
+                return 1
+            fi
+        done
+    fi
     # Single source in hooks/pre-commit -- previously duplicated (and divergent) across 4 installers.
     # Byte-by-byte comparison against what WOULD BE written, so an existing hook in CRLF
     # is rewritten in LF rather than reported as up to date.
@@ -419,6 +467,13 @@ install_for_user() {
         echo "  [dry-run] pre-commit hook: would install/update $pre_commit"
     else
         if [[ -f "$pre_commit" ]]; then
+            if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
+                if ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                    --manual-review "$pre_commit" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+                    warn "    Could not mark the existing hook for manual rollback review"
+                    return 1
+                fi
+            fi
             # Previous version skipped ANY existing hook, leaving old hooks
             # (with 'exit 1', which BLOCKS commits) permanently installed.
             local bak="$pre_commit.bak-$(date +%Y%m%d-%H%M%S)"
@@ -444,17 +499,46 @@ install_for_user() {
 
     # Git configuration for user
     if ! $DRY_RUN; then
+        local git_receipt_failed=0
         # git config --file writes directly to target user's .gitconfig. Previously
         # "sudo -u X git config --global", which depended on HOME pointing to the
         # target user and could end up writing to root's gitconfig.
-        git config --file "$home/.gitconfig" core.hooksPath "$hooks_dir" \
-            || warn "    git config core.hooksPath: failed for $username"
+        if [[ -z "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
+            git config --file "$home/.gitconfig" core.hooksPath "$hooks_dir" \
+                || warn "    git config core.hooksPath: failed for $username"
+        fi
         mkdir -p "$template_dir/hooks"
         cp "$pre_commit" "$template_dir/hooks/pre-commit" 2>/dev/null || true
         chmod +x "$template_dir/hooks/pre-commit" 2>/dev/null || true
-        git config --file "$home/.gitconfig" init.templateDir "$template_dir" || true
-        chown "$username" "$home/.gitconfig"
+        if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
+            if ! "$PY" "$SCRIPT_DIR/lib/git_config_receipt.py" \
+                --config-path "$home/.gitconfig" --hooks-dir "$hooks_dir" \
+                --template-dir "$template_dir" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+                warn "    Git configuration receipt failed for $username"
+                git_receipt_failed=1
+            fi
+        else
+            git config --file "$home/.gitconfig" init.templateDir "$template_dir" || true
+        fi
+        if [[ -f "$home/.gitconfig" ]]; then chown "$username" "$home/.gitconfig"; fi
         chown -R "$username" "$template_dir"
+        if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
+            local index
+            for index in "${!created_hook_files[@]}"; do
+                managed_file="${created_hook_files[$index]}"
+                if ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                    --created-file "$managed_file" --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+                    warn "    Could not record a created hook or scanner file for rollback"
+                    git_receipt_failed=1
+                elif ! "$PY" "$SCRIPT_DIR/lib/rollback_receipt.py" \
+                    --clear-provisional "${created_hook_guards[$index]}" \
+                    --receipt-dir "$EXPERIMENTAL_RECEIPT_DIR"; then
+                    warn "    Could not clear a provisional hook or scanner receipt"
+                    git_receipt_failed=1
+                fi
+            done
+        fi
+        if [[ "$git_receipt_failed" -ne 0 ]]; then return 1; fi
     else
         echo "  [dry-run] git config --global core.hooksPath $hooks_dir (as $username)"
         echo "  [dry-run] git config --global init.templateDir $template_dir (as $username)"
@@ -515,6 +599,7 @@ if [[ -z "$PY" ]]; then
 else
     MACHINE_ARGS=(--root "$SCRIPT_DIR" --scope machine --only "$ONLY")
     $DRY_RUN && MACHINE_ARGS+=(--dry-run)
+    [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]] && MACHINE_ARGS+=(--receipt-dir "$EXPERIMENTAL_RECEIPT_DIR")
     # rc 3 = step not requested. Detect by exit code, not by output parsing --
     # same contract the PowerShell engine uses, where Write-Host cannot be
     # captured by 2>&1.

@@ -48,7 +48,157 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
 | Skip scanners | `-SkipTools` | `--skip-tools` | Defers gitleaks, Semgrep, and Trivy installation. |
 | Skip VS Code | `-SkipVSCode` | `--skip-vscode` | Defers VS Code extension installation. |
 | Machine output | `-OutputMode Console|Json|Quiet` | `--output-mode Console|Json|Quiet` | `Console` is interactive; `Json` emits events; `Quiet` emits only the final JSON result. |
+| Experimental receipts | `-ExperimentalReceiptDir <absolute-dir>` | `--experimental-receipt-dir <absolute-dir>` | Source checkout only. Use a new, empty private directory for each run. Receipts cover new target files, newly created hook and scanner files, some appended guidance blocks, the two Git configuration keys together, one known previous Windows managed status-line payload, and canonical JSON key, permission-list, and MCP additions on Windows and Unix. Pre-existing hooks and scanner files are not reversible. This does not cover the full installation. Omit for normal deployment. |
 | List targets | `-ListTargets` | `--list-targets` | Lists manifest targets and exits without changes. |
+
+Unix rollback receipts record the resolved parent directory. Preview and apply
+reject a destination redirected through a changed symbolic link. Older pilot
+receipts without this field are accepted only when the parent path has no
+symbolic link.
+
+New Unix JSON key receipts are reversible only when the pre-install file uses
+the engine's canonical JSON serialization. The receipt stores prior hash,
+timestamp, mode, owner and group, without copying the prior content. Preview
+reconstructs the prior JSON by removing only the keys the installer added and
+verifies its hash. Apply rechecks the installed file's hash, identity and
+metadata under an open file descriptor before writing and restores the prior
+timestamp. Legacy receipts and files with custom JSON formatting remain
+preview-only; a run containing one blocks directory-wide apply.
+Windows canonical JSON key receipts likewise store a prior hash, byte length,
+creation and write timestamps, and the added key names without copying prior
+content. Preview reconstructs the prior bytes and checks the hash. Apply
+rechecks the installed bytes under an exclusive file handle, restores the
+prior bytes and timestamps, and reports a partial failure if restoration fails
+after writing begins. In experimental receipt mode, Windows preserves an
+existing JSON file that is noncanonical or exceeds the 1 MiB receipt limit;
+that file receives no inverse receipt because no change was made.
+On Windows and Unix, an existing canonical Claude permissions JSON can receive a
+`json_list_append` receipt when every affected list already exists and the
+merge changes no other field. The receipt keeps each list's prior length and
+the prior file hash, without copying the user's rules. Preview verifies that
+truncating only the appended entries reconstructs the exact prior file; apply
+restores its bytes and timestamp. Other existing permission-list merges remain
+manual-review items.
+On Windows and Unix, `merge-mcp` can record `json_mcp_added_servers` when it
+only adds server names to an existing canonical JSON object. The receipt stores
+those names and the prior file hash, without storing server definitions. A
+pre-existing server with a different definition remains a manual-review item.
+In experimental receipt mode, target engines also emit a `manual_review`
+receipt before changing an existing file without a supported inverse. That
+receipt stores no prior file content and blocks directory-wide apply. An
+operator must review those changes separately; a successful batch result can
+only describe the receipts it applied.
+For reversible writes, a provisional `receipt_incomplete` marker is written
+first and removed after the inverse receipt is saved. If the process stops
+between those steps, the marker blocks batch apply for operator review.
+In experimental mode, installers also mark pre-existing hook, scanner runner,
+Semgrep rule and Git template files before replacing them. Their prior bytes
+are not stored in receipts, so they remain manual-review items.
+New hook and scanner destinations receive a provisional marker before copying;
+the marker is cleared only after their created-file receipt is recorded. An
+interrupted copy therefore blocks batch apply instead of disappearing from its
+coverage report.
+The Git configuration pair also receives a provisional marker before either
+key is changed. A failed Git write or receipt write leaves that marker for
+manual review; it is cleared only after the matching inverse receipt is saved.
+
+The Windows source-checkout pilot also recognizes the Claude managed status
+line from the first public AgentShield revision. If its current SHA-256 matches
+the packaged prior payload, the installer records a `known_prior_payload`
+receipt without copying previous file contents. Preview verifies both the
+installed file and the prior payload; apply restores the old bytes and
+timestamps only while the installed file still matches. A customized or
+unknown prior file keeps a `manual_review` receipt. See
+[ROLLBACK-KNOWN-PAYLOADS.md](ROLLBACK-KNOWN-PAYLOADS.md). This receipt kind is
+not enabled in the Unix engine or release package.
+
+The source-checkout rollback scripts can preview one experimental run without
+changing files. Windows: `powershell -NoProfile -File scripts/windows/rollback.ps1
+-ReceiptDir <private-dir>`. Linux/macOS: `bash scripts/unix/rollback.sh
+--receipt-dir <private-dir>`. The JSON result lists each receipt's status and
+counts conflicts, without printing destination paths. If two receipts name
+the same destination, both are marked blocked for operator review. An
+experimental `-Apply` or `--apply` against the receipt directory first requires
+all receipts to be ready, then rechecks each before applying it. Git settings
+are restored before newly created hook files are removed. A failure stops the
+run and reports how many receipts were already applied. Keep the receipt
+directory for operator review; this remains a partial rollback, not a complete
+uninstall.
+
+For an end-to-end Windows pilot without changing the current user profile, run
+`powershell -NoProfile -ExecutionPolicy Bypass -File tests/rollback-install-windows.ps1`
+from the source checkout. It runs the real installer with `-Only claude-code
+-SkipTools -SkipVSCode` against an isolated temporary profile, previews and
+applies only a fully ready receipt set, then checks that created files and Git
+settings were removed. It also confirms that a pre-existing target file blocks
+batch rollback for manual review. It also merges and restores a canonical VS
+Code JSON file, plus existing Claude permission and MCP JSON files in a second
+isolated profile. Run it without Administrator privileges. It
+retains its temporary directory for inspection.
+
+On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File
+tests/rollback-managed-windows.ps1` exercises copies of the Claude and Codex
+machine manifests with destinations under a temporary directory. The copy
+disables the Administrator requirement only inside the fixture. It verifies
+created-file rollback and the manual-review block for an existing managed
+file. It also verifies restoration of the known previous status-line payload,
+including changed-file and invalid-digest refusal. A fixture injects a
+receipt-writing failure after the file changes and verifies that the surviving
+provisional marker blocks batch rollback. It also kills the isolated installer
+child process at that point and checks the same fail-closed result. Add
+`-RequireAdmin` from
+an elevated PowerShell session to retain and
+exercise the manifests' Administrator requirement with the same temporary
+destinations. Neither mode installs into the real Program Files or ProgramData
+locations.
+
+For a non-root Linux, WSL, or macOS source-checkout pilot, run
+`bash tests/rollback-install-unix.sh`. It uses a private temporary profile and
+receipt directory, requires a fully ready preview before applying rollback,
+checks that created files and Git settings were removed, verifies restoration
+of canonical VS Code JSON and existing Claude permission and MCP JSON files
+with their timestamps, and confirms that a
+pre-existing target file blocks batch rollback. It retains the temporary
+directory for inspection.
+
+For an isolated fleet-deploy pilot, run `powershell -NoProfile
+-ExecutionPolicy Bypass -File tests/rollback-deploy-windows.ps1` from an elevated
+PowerShell session, or `sudo bash tests/rollback-deploy-unix.sh` on Linux/WSL.
+Each test makes a temporary copy of the deploy script and substitutes only two
+temporary profile paths; the Unix copy also skips the host log and machine
+package prerequisite. Both retain the real privilege gate, target engine,
+receipt writer, and rollback. A clean two-profile run must roll back both
+profiles; a second run with one pre-existing file must block the entire batch.
+The two paths share one test OS identity. These pilots verify profile-path
+isolation, not ACL or ownership separation between distinct accounts. They
+retain their evidence directories for inspection and do not exercise macOS.
+
+On Windows, add `-DistinctSidAcl` to the elevated
+`tests/rollback-deploy-windows.ps1` command to run the same two-profile fixture
+with the built-in LOCAL SERVICE and NETWORK SERVICE SIDs. The test protects
+each temporary profile directory, checks that the target SID has an Allow ACE
+on its generated files and the other SID does not, then runs the existing
+rollback checks. It creates no accounts and does not log in as either service
+identity. This is ACL separation evidence, not an effective-access test for
+two real user accounts. Git for Windows must be available in `PATH`; the
+fixture checks this before creating temporary profiles because the deploy and
+rollback use Git to manage the per-profile configuration receipts.
+
+For a Linux test with two distinct UIDs in Docker under WSL, use a locally
+cached image containing Bash, Python 3, Git, `useradd`, and coreutils:
+
+```bash
+docker image ls --format '{{.Repository}}:{{.Tag}}'
+bash tests/rollback-deploy-linux-docker.sh --image python:3.13.18-bookworm
+```
+
+The wrapper refuses to pull an image, disables container networking, mounts
+the checkout read-only, and removes the container at exit. It creates two
+disposable accounts inside the container and checks file ownership, each
+account's access to its own profile, denial of cross-profile reads, and denial
+of receipt-directory access. It then runs the same clean and blocked batch
+rollback scenarios. The fixture evidence exists only until the container is
+removed. This test does not exercise host user accounts or macOS.
 
 `-Only` filters AI configuration only. Git hooks, scanner tools, and VS Code
 extensions remain separate layers controlled by their dedicated flags.

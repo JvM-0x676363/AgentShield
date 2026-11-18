@@ -28,6 +28,10 @@ import shutil
 import sys
 import time
 
+from rollback_receipt import ensure_private_directory, record_appended_block, record_created_file, record_json_added_keys, record_json_list_append, record_json_mcp_added_servers, record_manual_review
+
+RECEIPT_DIR = None
+
 # --- output ------------------------------------------------------------------
 # No color when stdout is not a TTY (remote runners like RTR/SCCM capture stdout).
 _TTY = sys.stdout.isatty()
@@ -147,14 +151,34 @@ def read_text(path):
         return f.read()
 
 
-def write_text(path, content, dry_run):
+def write_text(path, content, dry_run, reversible_existing=False):
     """UTF-8 without BOM, LF newlines."""
     if dry_run:
         detail(f"[dry-run] would write {path} ({len(content)} bytes)")
         return
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
+    created = not os.path.lexists(path)
+    guard_id = None
+    if RECEIPT_DIR:
+        try:
+            ensure_private_directory(RECEIPT_DIR)
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt unavailable: {exc}") from exc
+        if not created:
+            existing = os.lstat(path)
+            if not os.path.isfile(path) or existing.st_nlink != 1 or os.path.islink(path):
+                raise TargetError("unsafe destination type")
+        reason = "receipt_incomplete" if created or reversible_existing else "existing_target_has_no_inverse"
+        guard_id = record_manual_review(os.path.abspath(path), RECEIPT_DIR, reason)
+    with open(path, "x" if RECEIPT_DIR and created else "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
+    if RECEIPT_DIR and created:
+        try:
+            record_created_file(path, content.encode("utf-8"), RECEIPT_DIR)
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
+        os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
+    return guard_id if reversible_existing and not created else None
 
 
 def dump_json(obj):
@@ -244,7 +268,22 @@ def strat_merge_permission_lists(spec, dst, root, dry_run):
     if not isinstance(data, dict):
         raise TargetError(f"{dst}: expected top-level object")
 
-    backup(dst, dry_run)
+    prior_data = copy.deepcopy(data)
+    prior_serialized = dump_json(data)
+    prior_block = prior_data.get(parent)
+    reversible = isinstance(prior_block, dict)
+    lengths = {}
+    if reversible:
+        for name in lists:
+            if payload.get(name):
+                before = prior_block.get(name)
+                if not isinstance(before, list):
+                    reversible = False
+                    break
+                lengths[name] = len(before)
+        if any(k not in prior_block or prior_block[k] != v
+               for k, v in payload.items() if k not in lists):
+            reversible = False
     block = data.setdefault(parent, {})
     if not isinstance(block, dict):
         raise TargetError(f"{dst}: '{parent}' exists and is not an object")
@@ -265,7 +304,31 @@ def strat_merge_permission_lists(spec, dst, root, dry_run):
         if k not in lists:
             block[k] = v
 
-    write_text(dst, dump_json(data), dry_run)
+    content = dump_json(data)
+    if data == prior_data:
+        return "unchanged (rules already present)"
+    prior_content = prior_info = None
+    if RECEIPT_DIR and not dry_run and reversible and added:
+        prior_info = os.lstat(dst)
+        with open(dst, "rb") as source:
+            prior_content = source.read(1024 * 1024 + 1)
+        after_read = os.lstat(dst)
+        if ((prior_info.st_dev, prior_info.st_ino, prior_info.st_mtime_ns, prior_info.st_size) !=
+                (after_read.st_dev, after_read.st_ino, after_read.st_mtime_ns, after_read.st_size)):
+            raise TargetError("JSON target changed before merge")
+        if (len(prior_content) > 1024 * 1024 or len(content.encode("utf-8")) > 1024 * 1024 or
+                prior_content != prior_serialized.encode("utf-8")):
+            prior_content = prior_info = None
+    if not RECEIPT_DIR:
+        backup(dst, dry_run)
+    guard_id = write_text(dst, content, dry_run, reversible_existing=prior_content is not None)
+    if prior_content is not None:
+        try:
+            record_json_list_append(dst, content.encode("utf-8"), RECEIPT_DIR,
+                                    parent, lengths, prior_content, prior_info)
+            os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
     return f"merged (+{added} rules)"
 
 
@@ -283,13 +346,44 @@ def strat_merge_mcp(spec, dst, root, dry_run):
     if not isinstance(data, dict):
         raise TargetError(f"{dst}: expected top-level object")
 
-    backup(dst, dry_run)
+    prior_data = copy.deepcopy(data)
+    prior_serialized = dump_json(data)
+    prior_servers = prior_data.get(key)
+    reversible = isinstance(prior_servers, dict) and all(
+        name not in prior_servers or prior_servers[name] == value
+        for name, value in payload.items()
+    )
+    added_names = [name for name in payload if isinstance(prior_servers, dict) and name not in prior_servers]
     servers = data.setdefault(key, {})
     if not isinstance(servers, dict):
         raise TargetError(f"{dst}: '{key}' exists and is not an object")
     servers.update(payload)
 
-    write_text(dst, dump_json(data), dry_run)
+    content = dump_json(data)
+    if data == prior_data:
+        return "unchanged (servers already present)"
+    prior_content = prior_info = None
+    if RECEIPT_DIR and not dry_run and reversible and added_names:
+        prior_info = os.lstat(dst)
+        with open(dst, "rb") as source:
+            prior_content = source.read(1024 * 1024 + 1)
+        after_read = os.lstat(dst)
+        if ((prior_info.st_dev, prior_info.st_ino, prior_info.st_mtime_ns, prior_info.st_size) !=
+                (after_read.st_dev, after_read.st_ino, after_read.st_mtime_ns, after_read.st_size)):
+            raise TargetError("JSON target changed before merge")
+        if (len(prior_content) > 1024 * 1024 or len(content.encode("utf-8")) > 1024 * 1024 or
+                prior_content != prior_serialized.encode("utf-8")):
+            prior_content = prior_info = None
+    if not RECEIPT_DIR:
+        backup(dst, dry_run)
+    guard_id = write_text(dst, content, dry_run, reversible_existing=prior_content is not None)
+    if prior_content is not None:
+        try:
+            record_json_mcp_added_servers(dst, content.encode("utf-8"), RECEIPT_DIR,
+                                          key, added_names, prior_content, prior_info)
+            os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
     return f"merged ({len(payload)} servers)"
 
 
@@ -306,13 +400,36 @@ def strat_merge_missing_keys(spec, dst, root, dry_run):
     if not isinstance(data, dict):
         raise TargetError(f"{dst}: expected top-level object")
 
-    backup(dst, dry_run)
     added = [k for k in payload if k not in data]
+    if not added:
+        return "unchanged (keys already present)"
+    prior_content = prior_info = None
+    if RECEIPT_DIR and not dry_run:
+        prior_info = os.lstat(dst)
+        with open(dst, "rb") as source:
+            prior_content = source.read(1024 * 1024 + 1)
+        after_read = os.lstat(dst)
+        if ((prior_info.st_dev, prior_info.st_ino, prior_info.st_mtime_ns, prior_info.st_size) !=
+                (after_read.st_dev, after_read.st_ino, after_read.st_mtime_ns, after_read.st_size)):
+            raise TargetError("JSON target changed before merge")
+        if len(prior_content) > 1024 * 1024 or prior_content != dump_json(data).encode("utf-8"):
+            prior_content = prior_info = None
+    if not RECEIPT_DIR:
+        backup(dst, dry_run)
     for k in added:
         data[k] = payload[k]
 
-    write_text(dst, dump_json(data), dry_run)
-    return f"merged (+{len(added)} keys)" if added else "unchanged (keys already present)"
+    content = dump_json(data)
+    guard_id = write_text(dst, content, dry_run, reversible_existing=True)
+    if RECEIPT_DIR and not dry_run:
+        try:
+            record_json_added_keys(dst, content.encode("utf-8"), RECEIPT_DIR,
+                                   {key: payload[key] for key in added},
+                                   prior_content=prior_content, prior_info=prior_info)
+            os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
+    return f"merged (+{len(added)} keys)"
 
 
 def strat_md_block(spec, dst, root, dry_run):
@@ -331,7 +448,8 @@ def strat_md_block(spec, dst, root, dry_run):
         return "created"
 
     existing = read_text(dst)
-    if marker in existing:
+    marker_present = marker in existing
+    if marker_present:
         first = existing.index(marker)
         rest = existing[first + len(marker):]
         if marker in rest:
@@ -341,8 +459,20 @@ def strat_md_block(spec, dst, root, dry_run):
             return "block updated"
         warn(f"  unclosed opening marker in {os.path.basename(dst)} -- appending new block")
 
-    content = existing.rstrip("\n") + "\n\n" + block
-    write_text(dst, content, dry_run)
+    content = existing + ("\n" if existing.endswith("\n") else "\n\n") + block
+    prior_bytes = None
+    if RECEIPT_DIR and not dry_run and not marker_present:
+        with open(dst, "rb") as source:
+            prior_bytes = source.read()
+        if not content.encode("utf-8").startswith(prior_bytes):
+            prior_bytes = None
+    guard_id = write_text(dst, content, dry_run, reversible_existing=prior_bytes is not None)
+    if prior_bytes is not None:
+        try:
+            record_appended_block(dst, prior_bytes, content.encode("utf-8"), RECEIPT_DIR)
+            os.unlink(os.path.join(RECEIPT_DIR, guard_id + ".json"))
+        except (OSError, ValueError) as exc:
+            raise TargetError(f"rollback receipt failed: {exc}") from exc
     return "block appended"
 
 
@@ -379,6 +509,11 @@ def strat_remove(spec, dst, root, dry_run):
         return "absent -- nothing to remove"
     if dry_run:
         return "would remove (no longer distributed)"
+    if RECEIPT_DIR:
+        info = os.lstat(dst)
+        if os.path.islink(dst) or info.st_nlink != 1:
+            raise TargetError("unsafe destination type")
+        record_manual_review(os.path.abspath(dst), RECEIPT_DIR)
     os.remove(dst)
     return "file removed (no longer distributed)"
 
@@ -601,6 +736,7 @@ def print_target_list(targets, os_key):
 
 
 def main():
+    global RECEIPT_DIR
     ap = argparse.ArgumentParser(description="Applies targets/*.json manifests.")
     ap.add_argument("--root", default=".", help="repository root path")
     ap.add_argument("--scope", choices=["user", "machine", "all"], default="all")
@@ -612,7 +748,9 @@ def main():
     ap.add_argument("--list-targets", action="store_true",
                     help="lists available targets and selectors, then exits")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--receipt-dir", help="private directory for per-write rollback receipts")
     args = ap.parse_args()
+    RECEIPT_DIR = os.path.abspath(args.receipt_dir) if args.receipt_dir and not args.dry_run else None
 
     root = os.path.abspath(args.root)
     all_targets = load_all_targets(root)

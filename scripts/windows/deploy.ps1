@@ -12,6 +12,7 @@ param(
     # | vscode | managed | <target id>. Default: all.
     [string[]]$Only = @("all"),
     [switch]$ListTargets,
+    [string]$ExperimentalReceiptDir,
     [string]$LogPath = (Join-Path $env:SystemRoot "Temp\agent-shield-deploy.log"),
     [ValidateSet("Console", "Json", "Quiet")]
     [string]$OutputMode = "Console"
@@ -67,6 +68,19 @@ function Write-AgentShieldEvent {
 if ($ListTargets) {
     & (Join-Path $ScriptDir "lib\ApplyTargets.ps1") -Root $ScriptDir -ListTargets
     exit $LASTEXITCODE
+}
+
+if ($ExperimentalReceiptDir -and -not $DryRun) {
+    try {
+        if (-not (Test-Path -LiteralPath (Join-Path $ScriptDir 'scripts\windows\rollback.ps1'))) {
+            throw 'rollback_entry_point_missing'
+        }
+        . (Join-Path $ScriptDir 'lib\RollbackReceipt.ps1')
+        Assert-AgentShieldEmptyReceiptDirectory -LiteralPath $ExperimentalReceiptDir
+    } catch {
+        Microsoft.PowerShell.Utility\Write-Host "[ERROR] Experimental receipt directory unavailable: $($_.Exception.Message)" -ForegroundColor Red
+        exit 2
+    }
 }
 
 function Info($msg)    { Write-Host "[INFO] $msg" -ForegroundColor Green }
@@ -319,6 +333,7 @@ if ($LASTEXITCODE -eq 2) {
 
 $machineArgs = @{ Root = $ScriptDir; Scope = "machine"; Only = $Only }
 if ($DryRun) { $machineArgs["DryRun"] = $true }
+if ($ExperimentalReceiptDir -and -not $DryRun) { $machineArgs['ReceiptDir'] = $ExperimentalReceiptDir }
 
 # $machineOk has THREE states, not two: 1 applied, 0 failed, -1 not requested.
 # Without the third, '-Only codex-user' would exit with 1 for not applying
@@ -432,6 +447,7 @@ foreach ($user in $targetUsers) {
         $userApplyArgs = @{ Root = $ScriptDir; Scope = "user"
                             TargetHome = $user.Profile; Only = $Only }
         if ($DryRun) { $userApplyArgs["DryRun"] = $true }
+        if ($ExperimentalReceiptDir -and -not $DryRun) { $userApplyArgs['ReceiptDir'] = $ExperimentalReceiptDir }
 
         Invoke-AgentShieldEngine -Arguments $userApplyArgs
         # rc 3 = valid selection with no target in this scope. With -Only managed
@@ -500,10 +516,50 @@ foreach ($user in $targetUsers) {
         # (targets\vscode.json), alongside the rest of the configuration above.
 
         # --- Git hooks (audit mode) ---
-        if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $userHooksDir | Out-Null }
+        if (-not $DryRun -and -not $ExperimentalReceiptDir) {
+            New-Item -ItemType Directory -Force -Path $userHooksDir | Out-Null
+        }
         $userPreCommit = Join-Path $userHooksDir "pre-commit"
         $userScanRunner = Join-Path $userHooksDir "agent-shield-scan.py"
         $userScanRules = Join-Path $userHooksDir "agent-shield-rules"
+        $createdHookFiles = @()
+        $createdHookGuards = @{}
+        $existingHookFiles = @()
+        if ($ExperimentalReceiptDir -and -not $DryRun) {
+            foreach ($directory in @($userHooksDir, $userScanRules, $userTemplateDir,
+                    (Join-Path $userTemplateDir 'hooks'))) {
+                Assert-AgentShieldDestinationParents -Destination $directory
+                if (Test-Path -LiteralPath $directory) {
+                    $existingDirectory = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+                    if (-not $existingDirectory.PSIsContainer -or
+                        ($existingDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                        throw 'experimental_receipt_directory_unsafe'
+                    }
+                } else {
+                    New-Item -ItemType Directory -Path $directory -ErrorAction Stop | Out-Null
+                }
+            }
+            foreach ($managedFile in @($userPreCommit, $userScanRunner,
+                    (Join-Path $userScanRules 'agentshield-baseline.yml'),
+                    (Join-Path $userTemplateDir 'hooks\pre-commit'))) {
+                Assert-AgentShieldDestinationParents -Destination $managedFile
+                $existingFile = Get-Item -LiteralPath $managedFile -Force -ErrorAction SilentlyContinue
+                if ($existingFile -and ($existingFile.PSIsContainer -or
+                        ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                    throw 'experimental_receipt_destination_reparse_point'
+                }
+                if (-not $existingFile) {
+                    $createdHookGuards[$managedFile] = Write-AgentShieldManualReviewReceipt `
+                        -Destination $managedFile -ReceiptDir $ExperimentalReceiptDir -Reason 'receipt_incomplete'
+                    $createdHookFiles += $managedFile
+                }
+                elseif ($managedFile -ne $userPreCommit) { $existingHookFiles += $managedFile }
+            }
+            foreach ($managedFile in $existingHookFiles) {
+                Write-AgentShieldManualReviewReceipt -Destination $managedFile `
+                    -ReceiptDir $ExperimentalReceiptDir | Out-Null
+            }
+        }
 
         if (-not $DryRun) {
             Copy-Item -LiteralPath $SrcScanRunner -Destination $userScanRunner -Force
@@ -531,6 +587,10 @@ foreach ($user in $targetUsers) {
         } elseif ($DryRun) {
             Info "    [dry-run] pre-commit hook: would install/update $userPreCommit"
         } elseif (Test-Path $userPreCommit) {
+            if ($ExperimentalReceiptDir) {
+                Write-AgentShieldManualReviewReceipt -Destination $userPreCommit `
+                    -ReceiptDir $ExperimentalReceiptDir | Out-Null
+            }
             # Previous version skipped ANY existing hook, leaving old hooks
             # (with 'exit 1', which BLOCKS commits) in place.
             $bak = "$userPreCommit.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
@@ -543,6 +603,7 @@ foreach ($user in $targetUsers) {
         }
 
         if (-not $DryRun) {
+            $gitReceiptError = $null
             New-Item -ItemType Directory -Force -Path (Join-Path $userTemplateDir "hooks") | Out-Null
             if (Test-Path $userPreCommit) {
                 Copy-Item $userPreCommit (Join-Path $userTemplateDir "hooks\pre-commit") -Force
@@ -550,9 +611,19 @@ foreach ($user in $targetUsers) {
             # git config --file writes directly to target user's .gitconfig.
             # Replaces previous scheduled task approach that only worked
             # if user was logged in during deploy.
-            git config --file "$userGitConfig" core.hooksPath "$userHooksDir"
-            git config --file "$userGitConfig" init.templateDir "$userTemplateDir"
-            Info "    git config: written to $userGitConfig"
+            if ($ExperimentalReceiptDir) {
+                try {
+                    Set-AgentShieldGitConfigPairWithReceipt -ConfigPath $userGitConfig `
+                        -HooksDir $userHooksDir -TemplateDir $userTemplateDir `
+                        -ReceiptDir $ExperimentalReceiptDir | Out-Null
+                } catch {
+                    $gitReceiptError = $_.Exception.Message
+                }
+            } else {
+                git config --file "$userGitConfig" core.hooksPath "$userHooksDir"
+                git config --file "$userGitConfig" init.templateDir "$userTemplateDir"
+            }
+            if (-not $gitReceiptError) { Info "    git config: written to $userGitConfig" }
 
             Write-AgentShieldEvent -Event "phase" -Phase "ownership_repair"
             # Grant file ownership back to profile owner.
@@ -569,6 +640,17 @@ foreach ($user in $targetUsers) {
             # -- the directory tree belongs to it.
             Grant-UserOwnership -Path (Join-Path $user.Profile ".gemini") -Username $user.Username
             Grant-UserOwnership -Path (Join-Path $user.Profile "AppData\Roaming\Code\User") -Username $user.Username
+            if ($ExperimentalReceiptDir) {
+                foreach ($managedFile in $createdHookFiles) {
+                    Write-AgentShieldCreatedReceipt -Destination $managedFile `
+                        -InstalledBytes ([IO.File]::ReadAllBytes($managedFile)) `
+                        -ReceiptDir $ExperimentalReceiptDir | Out-Null
+                    $guard = $createdHookGuards[$managedFile]
+                    Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+                    Remove-Item -LiteralPath $guard -Force
+                }
+            }
+            if ($gitReceiptError) { throw "Git configuration receipt failed: $gitReceiptError" }
         } else {
             Info "    [dry-run] git config --file $userGitConfig core.hooksPath $userHooksDir"
             Info "    [dry-run] icacls on created files -> $($user.Username)"
