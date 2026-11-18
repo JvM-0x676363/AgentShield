@@ -1,26 +1,28 @@
 # Git approval policy
 
-AgentShield permits local `git add` and `git commit` in Claude Code and
-Antigravity on Windows, Linux, and macOS. The operator accepted automatic local
-commits on native Windows, where Claude Code shell commands run without its
-sandbox. A commit may execute repository hooks and Git filters; review the
-repository before asking an agent to work in it. The installed pre-commit scan
-still runs for ordinary commits. The permission rules deny the common
-`--no-verify` and `-n` forms and ask before `--amend`.
+AgentShield permits local `git add` in Claude Code and Antigravity, and local
+`git commit` in Claude Code, on Windows, Linux, and macOS. The operator accepted
+automatic local commits on native Windows, where Claude Code shell commands
+run without its sandbox. A commit may execute repository hooks and Git filters;
+review the repository before asking an agent to work in it. The installed
+pre-commit scan still runs for ordinary commits. Claude's permission rules
+deny the common `--no-verify` and `-n` forms and ask before `--amend`.
 
-| Operation | Claude Code and Antigravity | Codex |
-|---|---|---|
-| Local status, diff, log | Allowed | Runs within the selected profile |
-| Local add | Allowed | Unix managed default allows it; Windows may require approval for `.git` write |
-| Local commit | Allowed | Approval or Auto-review required for `.git` write |
-| Push, destructive history and worktree changes | Approval or deny | Approval or deny |
-| Hook bypass and force push patterns | Denied | Forbidden |
+| Operation | Claude Code | Antigravity | Codex |
+|---|---|---|---|
+| Local status, diff, log | Allowed | Allowed | Runs within the selected profile |
+| Local add | Allowed | Allowed | Unix managed default allows it; Windows may require approval for `.git` write |
+| Local commit | Allowed | Approval required pending CLI pilot | Approval or Auto-review required for `.git` write |
+| Push, destructive history and worktree changes | Approval or deny | Approval or deny | Approval or deny |
+| Hook bypass and force push patterns | Denied | Deny patterns; commit remains in Ask | Forbidden |
 
 Command permissions inspect command text, not Git's parsed arguments. The
-added patterns cover bypass flags before or after a commit message, but these
-rules are not a complete integrity boundary for every shell spelling. CI and
-pull request review remain necessary. Antigravity's regex matching, especially
-on Windows, needs a CLI pilot before this draft policy is deployed.
+Claude patterns cover common bypass flags before or after a commit message, but
+these rules are not a complete integrity boundary for every shell spelling.
+Antigravity can match regexes token by token when it parses a command, so a
+full-line regex check does not establish that a flag after the commit message
+is denied. Its commit rules remain in Ask until a CLI pilot confirms the
+matching on each supported OS. CI and pull request review remain necessary.
 
 Codex's managed `security_workspace` profile extends `:workspace`, which
 protects `.git` as read-only. Unix managed defaults already allow `git add`
