@@ -5,7 +5,8 @@ Antigravity on Windows, Linux, and macOS. The operator accepted automatic local
 commits on native Windows, where Claude Code shell commands run without its
 sandbox. A commit may execute repository hooks and Git filters; review the
 repository before asking an agent to work in it. The installed pre-commit scan
-still runs, and `git commit --no-verify` remains denied.
+still runs for ordinary commits. The permission rules deny the common
+`--no-verify` and `-n` forms and ask before `--amend`.
 
 | Operation | Claude Code and Antigravity | Codex |
 |---|---|---|
@@ -13,7 +14,13 @@ still runs, and `git commit --no-verify` remains denied.
 | Local add | Allowed | Unix managed default allows it; Windows may require approval for `.git` write |
 | Local commit | Allowed | Approval or Auto-review required for `.git` write |
 | Push, destructive history and worktree changes | Approval or deny | Approval or deny |
-| Hook bypass and force push | Denied | Forbidden |
+| Hook bypass and force push patterns | Denied | Forbidden |
+
+Command permissions inspect command text, not Git's parsed arguments. The
+added patterns cover bypass flags before or after a commit message, but these
+rules are not a complete integrity boundary for every shell spelling. CI and
+pull request review remain necessary. Antigravity's regex matching, especially
+on Windows, needs a CLI pilot before this draft policy is deployed.
 
 Codex's managed `security_workspace` profile extends `:workspace`, which
 protects `.git` as read-only. Unix managed defaults already allow `git add`
@@ -50,7 +57,10 @@ The remaining command gates deserve separate review:
   rather than changing an entire interpreter to `allow`.
 
 Sources: [Claude permission precedence](https://code.claude.com/docs/en/settings),
+[Claude command wildcard rules](https://code.claude.com/docs/en/permissions),
 [Claude sandbox platform coverage](https://code.claude.com/docs/en/sandboxing),
+[Antigravity command matching](https://antigravity.google/docs/permissions),
+[Git commit hook bypass options](https://git-scm.com/docs/git-commit),
 [Codex protected paths and Auto-review](https://learn.chatgpt.com/docs/agent-approvals-security),
 [Codex Auto-review setup](https://learn.chatgpt.com/docs/sandboxing/auto-review),
 [Codex permission profiles](https://learn.chatgpt.com/docs/permissions).

@@ -593,6 +593,39 @@ for mid in ("claude-code", "claude-managed", "antigravity"):
           "  %s: push still requires approval" % mid)
     check(bypass_rule in permissions.get("deny", []),
           "  %s: commit hook bypass remains denied" % mid)
+    if mid == "antigravity":
+        check("command(regex:git commit .*)" in permissions.get("allow", []),
+              "  antigravity: regex grant covers Windows command matching")
+        deny_patterns = [rule[len("command(regex:"):-1]
+                         for rule in permissions.get("deny", [])
+                         if rule.startswith("command(regex:git commit ")]
+        ask_patterns = [rule[len("command(regex:"):-1]
+                        for rule in permissions.get("ask", [])
+                        if rule.startswith("command(regex:git commit ")]
+        for command in ("git commit --no-verify -m test",
+                        "git commit -m test --no-verify",
+                        "git commit -n -m test",
+                        "git commit -m test -n"):
+            check(any(re.fullmatch(pattern, command) for pattern in deny_patterns),
+                  "  antigravity: denies hook bypass in '%s'" % command)
+        check(any(re.fullmatch(pattern, "git commit -m test --amend")
+                  for pattern in ask_patterns),
+              "  antigravity: amend still requires approval")
+    else:
+        deny_patterns = [rule[len("Bash("):-1] for rule in permissions.get("deny", [])]
+        ask_patterns = [rule[len("Bash("):-1] for rule in permissions.get("ask", [])]
+        def matches_wildcard(pattern, command):
+            return bool(re.fullmatch(re.escape(pattern).replace(r"\*", ".*"), command))
+        for command in ("git commit --no-verify -m test",
+                        "git commit -m test --no-verify",
+                        "git commit -n -m test",
+                        "git commit -m test -n"):
+            check(any(matches_wildcard(pattern, command)
+                      for pattern in deny_patterns if "*" in pattern and ":*" not in pattern),
+                  "  %s: denies hook bypass in '%s'" % (mid, command))
+        check(any(matches_wildcard(pattern, "git commit -m test --amend")
+                  for pattern in ask_patterns if "*" in pattern and ":*" not in pattern),
+              "  %s: amend still requires approval" % mid)
 
 if tomllib and os.path.isfile(os.path.join(ROOT, req)):
     with open(os.path.join(ROOT, req), "rb") as fh:
@@ -600,6 +633,18 @@ if tomllib and os.path.isfile(os.path.join(ROOT, req)):
     rtxt = json.dumps(_rq, ensure_ascii=False)
     for frag in ("curl", "wget", "core.hooksPath", "--no-verify", "--force"):
         check(frag in rtxt, "  codex requirements: covers '%s'" % frag)
+    for requirement_path in (req, "policy/codex-requirements-unix.toml"):
+        with open(os.path.join(ROOT, requirement_path), "rb") as fh:
+            requirement_data = tomllib.load(fh)
+        rules = requirement_data.get("rules", {}).get("prefix_rules", [])
+        short_bypass_denied = any(
+            rule.get("decision") == "forbidden"
+            and [token.get("token") for token in rule.get("pattern", [])]
+            == ["git", "commit", "-n"]
+            for rule in rules
+        )
+        check(short_bypass_denied,
+              "  %s: direct git commit -n is forbidden" % requirement_path)
     check(bool(_rq.get("permissions", {}).get("security_workspace", {}).get("filesystem", {}).get(":workspace_roots")),
           "  codex requirements: workspace secret deny rules present")
 

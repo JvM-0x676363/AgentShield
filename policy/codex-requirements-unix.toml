@@ -60,6 +60,7 @@ prefix_rules = [
   { pattern = [{ token = "git" }, { token = "push" }, { token = "-f" }], decision = "forbidden", justification = "Short-form forced push rewrites remote history." },
   { pattern = [{ token = "git" }, { token = "filter-branch" }], decision = "forbidden", justification = "Rewrites repository history." },
   { pattern = [{ token = "git" }, { token = "commit" }, { token = "--no-verify" }], decision = "forbidden", justification = "Bypasses the local audit hook." },
+  { pattern = [{ token = "git" }, { token = "commit" }, { token = "-n" }], decision = "forbidden", justification = "Short form bypasses the local audit hook." },
   { pattern = [{ token = "kubectl" }, { token = "get" }, { any_of = ["secret", "secrets"] }], decision = "forbidden", justification = "May disclose runtime credentials. Use an authorized human workflow." },
   { pattern = [{ token = "kubectl" }, { token = "describe" }, { any_of = ["secret", "secrets"] }], decision = "forbidden", justification = "May disclose credential metadata from runtime." },
   { pattern = [{ token = "kubectl" }, { token = "create" }, { token = "token" }], decision = "forbidden", justification = "Creates a cluster access credential." },

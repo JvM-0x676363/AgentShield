@@ -73,7 +73,8 @@
       "commands": [
         "git push --force",
         "git config --global core.hooksPath",
-        "git commit --no-verify"
+        "git commit --no-verify",
+        "git commit -n"
       ]
     },
     "confirm_interpreters_and_infra": {
@@ -97,7 +98,7 @@
       ]
     },
     "allow_common_dev_workflows": {
-      "rationale": "Reduce approval fatigue in ordinary workflows so remaining prompts are meaningful. This is an operational concession, not a security classification: git add and npm run can change state or execute project scripts. Claude Code and Antigravity also allow local git commit by operator decision; Codex retains approval because its workspace profile protects .git and an allow rule would execute outside the sandbox.",
+      "rationale": "Reduce approval fatigue in ordinary workflows so remaining prompts are meaningful. This is an operational concession, not a security classification: git add and npm run can change state or execute project scripts. Claude Code and Antigravity also allow ordinary local git commit by operator decision; hook bypass is denied and amend still asks. Codex retains approval because its workspace profile protects .git and an allow rule would execute outside the sandbox.",
       "commands": [
         "git status",
         "git diff",
