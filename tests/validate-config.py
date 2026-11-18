@@ -571,6 +571,29 @@ for mid in ("claude-code", "claude-managed", "antigravity"):
         for frag in ("core.hooksPath", "no-verify", "push --force"):
             check(frag in txt, "  %s: guards git ('%s')" % (mid, frag))
 
+# Local commits avoid an approval prompt, while publication and hook bypass
+# remain gated. Codex keeps its sandbox approval because .git is protected.
+for mid in ("claude-code", "claude-managed", "antigravity"):
+    if mid not in manifests:
+        continue
+    permission_specs = [spec.get("payload", {}).get("permissions", {})
+                        for spec in manifests[mid].get("files", [])]
+    permissions = next((entry for entry in permission_specs
+                        if isinstance(entry, dict) and "allow" in entry), {})
+    commit_rule = ("command(git commit)" if mid == "antigravity"
+                   else "Bash(git commit:*)")
+    push_rule = ("command(git push)" if mid == "antigravity"
+                 else "Bash(git push:*)")
+    bypass_rule = ("command(git commit --no-verify)" if mid == "antigravity"
+                   else "Bash(git commit --no-verify:*)")
+    check(commit_rule in permissions.get("allow", [])
+          and commit_rule not in permissions.get("ask", []),
+          "  %s: local commit is allowed without an explicit ask" % mid)
+    check(push_rule in permissions.get("ask", []),
+          "  %s: push still requires approval" % mid)
+    check(bypass_rule in permissions.get("deny", []),
+          "  %s: commit hook bypass remains denied" % mid)
+
 if tomllib and os.path.isfile(os.path.join(ROOT, req)):
     with open(os.path.join(ROOT, req), "rb") as fh:
         _rq = tomllib.load(fh)
