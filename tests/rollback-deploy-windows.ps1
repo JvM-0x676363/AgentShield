@@ -142,6 +142,9 @@ $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Run this isolated deploy test from an elevated PowerShell session.'
 }
+if (-not (Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue)) {
+    throw 'Git for Windows is required in PATH for this deploy and rollback fixture.'
+}
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 
 foreach ($scenario in @('ready', 'review')) {

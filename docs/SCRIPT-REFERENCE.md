@@ -180,7 +180,9 @@ each temporary profile directory, checks that the target SID has an Allow ACE
 on its generated files and the other SID does not, then runs the existing
 rollback checks. It creates no accounts and does not log in as either service
 identity. This is ACL separation evidence, not an effective-access test for
-two real user accounts.
+two real user accounts. Git for Windows must be available in `PATH`; the
+fixture checks this before creating temporary profiles because the deploy and
+rollback use Git to manage the per-profile configuration receipts.
 
 For a Linux test with two distinct UIDs in Docker under WSL, use a locally
 cached image containing Bash, Python 3, Git, `useradd`, and coreutils:
