@@ -45,3 +45,15 @@ initial evaluation and admission criteria are in
 [CLAUDE-MODS.md](CLAUDE-MODS.md). The only candidate currently under
 consideration is a read-only security-posture panel built from the existing
 sanitized scan-state record. No Mod is deployed by AgentShield.
+
+## Antigravity local commits
+
+Keep `git commit` in Ask. Before considering an opt-in Allow rule, test the
+candidate permission policy in a disposable Git repository and isolated user
+profile on Windows, Linux, and macOS. Record the CLI version, effective rules,
+actual tool decisions, and whether Git changed the fixture. Ordinary commits
+must run without approval; `--no-verify`, `-n`, `--amend`, and push must never
+run automatically. An agent response without a tool event is not evidence of
+the permission decision. The CLI 1.5.11 pilot on Windows only established that
+a benign project Ask regex requested approval; the unsafe bypass prompt was
+refused before a tool call.

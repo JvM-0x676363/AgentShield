@@ -571,12 +571,70 @@ for mid in ("claude-code", "claude-managed", "antigravity"):
         for frag in ("core.hooksPath", "no-verify", "push --force"):
             check(frag in txt, "  %s: guards git ('%s')" % (mid, frag))
 
+# Claude local commits avoid an approval prompt. Antigravity and Codex retain
+# approval for commits; Codex also protects .git in its workspace profile.
+for mid in ("claude-code", "claude-managed", "antigravity"):
+    if mid not in manifests:
+        continue
+    permission_specs = [spec.get("payload", {}).get("permissions", {})
+                        for spec in manifests[mid].get("files", [])]
+    permissions = next((entry for entry in permission_specs
+                        if isinstance(entry, dict) and "allow" in entry), {})
+    commit_rule = ("command(git commit)" if mid == "antigravity"
+                   else "Bash(git commit:*)")
+    push_rule = ("command(git push)" if mid == "antigravity"
+                 else "Bash(git push:*)")
+    bypass_rule = ("command(git commit --no-verify)" if mid == "antigravity"
+                   else "Bash(git commit --no-verify:*)")
+    if mid == "antigravity":
+        check(commit_rule in permissions.get("ask", [])
+              and commit_rule not in permissions.get("allow", [])
+              and not any(rule.startswith("command(regex:git commit ")
+                          for bucket in ("allow", "ask", "deny")
+                          for rule in permissions.get(bucket, [])),
+              "  antigravity: local commit stays in Ask without unverified regex rules")
+    else:
+        check(commit_rule in permissions.get("allow", [])
+              and commit_rule not in permissions.get("ask", []),
+              "  %s: local commit is allowed without an explicit ask" % mid)
+    check(push_rule in permissions.get("ask", []),
+          "  %s: push still requires approval" % mid)
+    check(bypass_rule in permissions.get("deny", []),
+          "  %s: commit hook bypass remains denied" % mid)
+    if mid != "antigravity":
+        deny_patterns = [rule[len("Bash("):-1] for rule in permissions.get("deny", [])]
+        ask_patterns = [rule[len("Bash("):-1] for rule in permissions.get("ask", [])]
+        def matches_wildcard(pattern, command):
+            return bool(re.fullmatch(re.escape(pattern).replace(r"\*", ".*"), command))
+        for command in ("git commit --no-verify -m test",
+                        "git commit -m test --no-verify",
+                        "git commit -n -m test",
+                        "git commit -m test -n"):
+            check(any(matches_wildcard(pattern, command)
+                      for pattern in deny_patterns if "*" in pattern and ":*" not in pattern),
+                  "  %s: denies hook bypass in '%s'" % (mid, command))
+        check(any(matches_wildcard(pattern, "git commit -m test --amend")
+                  for pattern in ask_patterns if "*" in pattern and ":*" not in pattern),
+              "  %s: amend still requires approval" % mid)
+
 if tomllib and os.path.isfile(os.path.join(ROOT, req)):
     with open(os.path.join(ROOT, req), "rb") as fh:
         _rq = tomllib.load(fh)
     rtxt = json.dumps(_rq, ensure_ascii=False)
     for frag in ("curl", "wget", "core.hooksPath", "--no-verify", "--force"):
         check(frag in rtxt, "  codex requirements: covers '%s'" % frag)
+    for requirement_path in (req, "policy/codex-requirements-unix.toml"):
+        with open(os.path.join(ROOT, requirement_path), "rb") as fh:
+            requirement_data = tomllib.load(fh)
+        rules = requirement_data.get("rules", {}).get("prefix_rules", [])
+        short_bypass_denied = any(
+            rule.get("decision") == "forbidden"
+            and [token.get("token") for token in rule.get("pattern", [])]
+            == ["git", "commit", "-n"]
+            for rule in rules
+        )
+        check(short_bypass_denied,
+              "  %s: direct git commit -n is forbidden" % requirement_path)
     check(bool(_rq.get("permissions", {}).get("security_workspace", {}).get("filesystem", {}).get(":workspace_roots")),
           "  codex requirements: workspace secret deny rules present")
 
