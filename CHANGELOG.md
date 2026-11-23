@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Added an optional, local-only Claude Code security posture panel prototype.
+  It reads a bounded sanitized scan-state record on demand and is excluded from
+  installers, deployment targets, endpoint packages, and managed payloads.
 - Added a disabled Claude write-guard pilot with synthetic tests and a Windows
   build helper. It is not included in installers, deployment targets, endpoint
   packages, or managed payloads.
