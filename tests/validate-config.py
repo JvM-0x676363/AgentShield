@@ -1038,6 +1038,20 @@ if check(os.path.isfile(os.path.join(ROOT, PLAYBOOK)), "exists: %s" % PLAYBOOK):
     check("security-review-playbook.md" in runtime,
           "  core-runtime points to the playbook")
 
+for mid, vendor in (("claude-code", "claude-code"), ("claude-managed", "claude-code"),
+                    ("codex-user", "codex-cli"), ("antigravity", "antigravity")):
+    files = manifests.get(mid, {}).get("files", [])
+    reference = "policy/vendor-%s.md" % vendor
+    pointer = "policy/vendor-%s-pointer.md" % vendor
+    for context in (f for f in files if "policy/core-runtime.md" in f.get("compose", [])):
+        check(pointer in context["compose"] and reference not in context["compose"],
+              "%s: vendor reference is loaded on demand" % mid)
+        for required in (reference, PLAYBOOK):
+            for platform, destination in context["dest"].items():
+                expected = destination.rsplit("/", 1)[0] + "/" + required.rsplit("/", 1)[1]
+                check(any(f.get("payload_file") == required and
+                          f.get("dest", {}).get(platform) == expected for f in files),
+                      "%s/%s: adjacent reference %s" % (mid, platform, required))
 # Codex needs project guidance beyond the managed rules. The root file is
 # intentionally short: details live in policy/ and in the tests.
 agents_path = os.path.join(ROOT, "AGENTS.md")

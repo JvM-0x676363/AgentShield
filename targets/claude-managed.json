@@ -37,6 +37,28 @@
   "files": [
     {
       "dest": {
+        "windows": "${PROGRAMFILES}/ClaudeCode/vendor-claude-code.md",
+        "linux": "/etc/claude-code/vendor-claude-code.md",
+        "darwin": "/Library/Application Support/ClaudeCode/vendor-claude-code.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "backup": true,
+      "payload_file": "policy/vendor-claude-code.md"
+    },
+    {
+      "dest": {
+        "windows": "${PROGRAMFILES}/ClaudeCode/security-review-playbook.md",
+        "linux": "/etc/claude-code/security-review-playbook.md",
+        "darwin": "/Library/Application Support/ClaudeCode/security-review-playbook.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "backup": true,
+      "payload_file": "policy/security-review-playbook.md"
+    },
+    {
+      "dest": {
         "windows": "${PROGRAMFILES}/ClaudeCode/managed-settings.json",
         "linux": "/etc/claude-code/managed-settings.json",
         "darwin": "/Library/Application Support/ClaudeCode/managed-settings.json"
@@ -284,7 +306,7 @@
       "$comment": "Managed policy CLAUDE.md. Unlike ~/.claude/CLAUDE.md, developers cannot delete this (requires admin) and cannot exclude it via claudeMdExcludes: official documentation states: 'Managed policy CLAUDE.md files cannot be excluded'. This is NOT hard technical enforcement: documentation notes that CLAUDE.md shapes behavior rather than acting as an enforcement layer. The adjacent managed-settings.json enforces policy.",
       "compose": [
         "policy/core-runtime.md",
-        "policy/vendor-claude-code.md"
+        "policy/vendor-claude-code-pointer.md"
       ]
     }
   ]

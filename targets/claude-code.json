@@ -33,6 +33,17 @@
   "files": [
     {
       "dest": {
+        "windows": "${HOME}/.claude/vendor-claude-code.md",
+        "linux": "${HOME}/.claude/vendor-claude-code.md",
+        "darwin": "${HOME}/.claude/vendor-claude-code.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "backup": true,
+      "payload_file": "policy/vendor-claude-code.md"
+    },
+    {
+      "dest": {
         "windows": "${HOME}/.claude/security-review-playbook.md",
         "linux": "${HOME}/.claude/security-review-playbook.md",
         "darwin": "${HOME}/.claude/security-review-playbook.md"
@@ -65,7 +76,7 @@
       "marker": "<!-- security-team-block -->",
       "compose": [
         "policy/core-runtime.md",
-        "policy/vendor-claude-code.md"
+        "policy/vendor-claude-code-pointer.md"
       ],
       "superseded_by": {
         "windows": "${PROGRAMFILES}/ClaudeCode/CLAUDE.md",
