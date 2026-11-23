@@ -33,6 +33,14 @@ local scorecard. It makes Codex, Claude Code, and Claude Desktop results
 comparable when the prompts, fixture revision, platform, sandbox, and agent
 version are recorded. The scorecard does not infer evidence; a human reviewer
 still scores each control from the sanitized conversation record.
+Automated collection remains deferred until an external runner can enforce the
+isolation and evidence requirements in
+[BENCHMARK-RUNNER-CONTRACT.md](BENCHMARK-RUNNER-CONTRACT.md). Do not run an
+agent CLI directly from a benchmark helper as a substitute for that boundary.
+Automated collection remains deferred until an external runner can enforce the
+isolation and evidence requirements in
+[BENCHMARK-RUNNER-CONTRACT.md](BENCHMARK-RUNNER-CONTRACT.md). Do not run an
+agent CLI directly from a benchmark helper as a substitute for that boundary.
 
 Remaining work: build a privacy-preserving aggregate report only after there
 are enough repeated runs to define meaningful trend thresholds.

@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Documented the isolation contract required before automated agent benchmark
+  collection can be added. Interactive benchmark scoring remains supported;
+  uncontained local agent runners are not distributed.
 - Added an optional, local-only Claude Code security posture panel prototype.
   It reads a bounded sanitized scan-state record on demand and is excluded from
   installers, deployment targets, endpoint packages, and managed payloads.

@@ -10,6 +10,7 @@
 | [GIT-GATE-TUNING.md](GIT-GATE-TUNING.md) | Git approval decisions and remaining gates |
 | [WINDOWS-SANDBOX.md](WINDOWS-SANDBOX.md) | Windows Codex sandbox incident record |
 | [roadmap.md](roadmap.md) | Planned improvements that are not active controls |
+| [BENCHMARK-RUNNER-CONTRACT.md](BENCHMARK-RUNNER-CONTRACT.md) | Isolation requirements for future benchmark automation |
 | [pt-BR/README.md](pt-BR/README.md) | Detailed Portuguese reference guide |
 
 Public-facing documentation is written in English. Portuguese reference
