@@ -1152,6 +1152,25 @@ for _mid, _manifest in manifests.items():
           _found or "")
 
 # =============================================================================
+section("6a2. Benchmark automation remains deferred")
+# =============================================================================
+_benchmark_contract = "docs/BENCHMARK-RUNNER-CONTRACT.md"
+check(os.path.isfile(os.path.join(ROOT, _benchmark_contract)),
+      "  benchmark runner contract exists")
+if os.path.isfile(os.path.join(ROOT, _benchmark_contract)):
+    _benchmark_contract_text = " ".join(read(_benchmark_contract).split())
+    for _term in (
+        "operating-system-enforced boundary",
+        "empty, allowlisted environment",
+        "No general outbound network access",
+        "CPU, memory, process, file-size, disk, and wall-clock limits",
+        "must not retain raw tool output",
+        "not installed or invoked by normal AgentShield `install` or `deploy` flows",
+    ):
+        check(_term in _benchmark_contract_text,
+              "  benchmark runner contract requires %s" % _term)
+
+# =============================================================================
 section("6b. README inventory matches disk")
 # =============================================================================
 # Documentation drift is the same problem the rest of this file addresses:
@@ -2396,7 +2415,7 @@ def _anchor(titulo):
 
 _docs_md = ["README.md", ARCHITECTURE_DOC, OPERATIONS_DOC, "tests/README.md", "targets/README.md",
             "integrations/bitbucket/README.md", "integrations/vscode-gpo/README.md", "docs/README.md",
-            "docs/ARCHITECTURE.md", "docs/OPERATIONS.md", "docs/PLATFORMS.md"]
+            "docs/ARCHITECTURE.md", "docs/BENCHMARK-RUNNER-CONTRACT.md", "docs/OPERATIONS.md", "docs/PLATFORMS.md"]
 _total_links = 0
 for _f in _docs_md:
     if not os.path.isfile(os.path.join(ROOT, _f)):

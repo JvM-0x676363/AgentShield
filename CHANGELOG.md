@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Documented the isolation contract required before automated agent benchmark
+  collection can be added. Interactive benchmark scoring remains supported;
+  uncontained local agent runners are not distributed.
 - Added a disabled Claude write-guard pilot with synthetic tests and a Windows
   build helper. It is not included in installers, deployment targets, endpoint
   packages, or managed payloads.
