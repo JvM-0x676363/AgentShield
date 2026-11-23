@@ -15,6 +15,7 @@ param(
     [switch]   $ListTargets,
     [switch]   $SkipTools,
     [switch]   $SkipVSCode,
+    [string]   $ExperimentalReceiptDir,
     [ValidateSet("Console", "Json", "Quiet")]
     [string]   $OutputMode = "Console"
 )
@@ -131,6 +132,19 @@ if (-not (Test-Path (Join-Path $ScriptDir "targets"))) {
 
 $applyScript = Join-Path $ScriptDir "lib\ApplyTargets.ps1"
 $failedTargets = 0
+if ($ExperimentalReceiptDir -and -not $DryRun) {
+    try {
+        if (-not (Test-Path -LiteralPath (Join-Path $ScriptDir 'scripts\windows\rollback.ps1'))) {
+            throw 'rollback_entry_point_missing'
+        }
+        . (Join-Path $ScriptDir 'lib\RollbackReceipt.ps1')
+        Assert-AgentShieldEmptyReceiptDirectory -LiteralPath $ExperimentalReceiptDir
+    } catch {
+        Err "Experimental receipt directory unavailable: $($_.Exception.Message)"
+        exit 2
+    }
+    Warn 'Experimental rollback is partial; existing files without an inverse require manual review.'
+}
 
 # Validate selectors prior to making any changes
 & $applyScript -Root $ScriptDir -Scope machine -Only $Only -DryRun *>$null
@@ -168,6 +182,7 @@ if (-not $machineSelected) {
     }
     $machineArgs = @{ Root = $ScriptDir; Scope = "machine"; Only = $Only }
     if ($DryRun) { $machineArgs["DryRun"] = $true }
+    if ($ExperimentalReceiptDir -and -not $DryRun) { $machineArgs['ReceiptDir'] = $ExperimentalReceiptDir }
     Invoke-AgentShieldEngine -Arguments $machineArgs
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3) {
         Err "administrative layer failed (rc=$LASTEXITCODE)"
@@ -189,6 +204,7 @@ Write-Host "`n[AI Configuration - User Scope]" -ForegroundColor Cyan
 
 $applyArgs = @{ Root = $ScriptDir; Scope = "user"; TargetHome = $env:USERPROFILE; Only = $Only }
 if ($DryRun) { $applyArgs["DryRun"] = $true }
+if ($ExperimentalReceiptDir -and -not $DryRun) { $applyArgs['ReceiptDir'] = $ExperimentalReceiptDir }
 
 Invoke-AgentShieldEngine -Arguments $applyArgs
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3) {
@@ -241,7 +257,9 @@ if (-not $vsCodeBin) {
     if ($codeCmd) { $vsCodeBin = $codeCmd.Source }
 }
 
-if ($vsCodeBin) {
+if ($SkipVSCode) {
+    Info "  VS Code extensions skipped (-SkipVSCode)"
+} elseif ($vsCodeBin) {
     foreach ($ext in $vsExts) {
         if ($DryRun) { Info "  [dry-run] code --install-extension $ext --force" }
         else {
@@ -264,11 +282,49 @@ $PreCommit = Join-Path $HooksDir "pre-commit"
 $srcHook   = Join-Path $ScriptDir "hooks\pre-commit"
 $ScannerRunner = Join-Path $ScriptDir "scripts\scan\agent_shield_scan.py"
 $InstalledScannerRunner = Join-Path $HooksDir "agent-shield-scan.py"
+$TemplateHooksDir = Join-Path $TemplateDir "hooks"
+$createdHookFiles = @()
+$createdHookGuards = @{}
+$existingHookFiles = @()
+if ($ExperimentalReceiptDir -and -not $DryRun) {
+    foreach ($directory in @($HooksDir, $TemplateDir, $TemplateHooksDir)) {
+        Assert-AgentShieldDestinationParents -Destination $directory
+        if (Test-Path -LiteralPath $directory) {
+            $existingDirectory = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
+            if (-not $existingDirectory.PSIsContainer -or
+                ($existingDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'experimental_receipt_directory_unsafe'
+            }
+        } else {
+            New-Item -ItemType Directory -Path $directory -ErrorAction Stop | Out-Null
+        }
+    }
+    foreach ($managedFile in @($PreCommit, $InstalledScannerRunner,
+            (Join-Path $TemplateHooksDir 'pre-commit'))) {
+        Assert-AgentShieldDestinationParents -Destination $managedFile
+        $existingFile = Get-Item -LiteralPath $managedFile -Force -ErrorAction SilentlyContinue
+        if ($existingFile -and ($existingFile.PSIsContainer -or
+                ($existingFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw 'experimental_receipt_destination_reparse_point'
+        }
+        if (-not $existingFile) {
+            $createdHookGuards[$managedFile] = Write-AgentShieldManualReviewReceipt `
+                -Destination $managedFile -ReceiptDir $ExperimentalReceiptDir -Reason 'receipt_incomplete'
+            $createdHookFiles += $managedFile
+        }
+        elseif ($managedFile -ne $PreCommit) { $existingHookFiles += $managedFile }
+    }
+    foreach ($managedFile in $existingHookFiles) {
+        Write-AgentShieldManualReviewReceipt -Destination $managedFile `
+            -ReceiptDir $ExperimentalReceiptDir | Out-Null
+    }
+}
 
 Info "Configuring core.hooksPath -> $HooksDir"
 if (-not $DryRun) {
     New-Item -ItemType Directory -Force -Path $HooksDir | Out-Null
-    git config --global core.hooksPath $HooksDir
+    if (-not $ExperimentalReceiptDir) { git config --global core.hooksPath $HooksDir }
+    if ($ExperimentalReceiptDir) { Assert-AgentShieldDestinationParents -Destination $InstalledScannerRunner }
     Copy-Item -LiteralPath $ScannerRunner -Destination $InstalledScannerRunner -Force
 } else {
     Info "  [dry-run] mkdir $HooksDir"
@@ -289,29 +345,61 @@ if ($hookIsCurrent) {
 } elseif ($DryRun) {
     Info "  [dry-run] Would install/update $PreCommit"
 } elseif (Test-Path $PreCommit) {
+    if ($ExperimentalReceiptDir) {
+        Write-AgentShieldManualReviewReceipt -Destination $PreCommit `
+            -ReceiptDir $ExperimentalReceiptDir | Out-Null
+    }
     $bak = "$PreCommit.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
     Copy-Item $PreCommit $bak -Force
     Write-ShellScript -Path $PreCommit -Content $srcHookLf
     Warn "pre-commit hook outdated -- replaced (backup in $bak)"
 } else {
     Info "Installing pre-commit hook from hooks\pre-commit (audit only)..."
+    if ($ExperimentalReceiptDir) { Assert-AgentShieldDestinationParents -Destination $PreCommit }
     Write-ShellScript -Path $PreCommit -Content $srcHookLf
     Info "  OK created at $PreCommit (audit mode: gitleaks + trivy)"
 }
 
-$TemplateHooksDir = Join-Path $TemplateDir "hooks"
 Info "Configuring init.templateDir -> $TemplateDir"
 if (-not $DryRun) {
     New-Item -ItemType Directory -Force -Path $TemplateHooksDir | Out-Null
     Get-ChildItem -Path $TemplateHooksDir -Filter "pre-commit.bak*" -File `
         -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
     if (Test-Path $PreCommit) {
+        if ($ExperimentalReceiptDir) {
+            Assert-AgentShieldDestinationParents -Destination (Join-Path $TemplateHooksDir 'pre-commit')
+        }
         Copy-Item $PreCommit (Join-Path $TemplateHooksDir "pre-commit") -Force
     }
-    git config --global init.templateDir $TemplateDir
+    if ($ExperimentalReceiptDir) {
+        try {
+            Set-AgentShieldGitConfigPairWithReceipt -ConfigPath (Join-Path $env:USERPROFILE '.gitconfig') `
+                -HooksDir $HooksDir -TemplateDir $TemplateDir -ReceiptDir $ExperimentalReceiptDir | Out-Null
+        } catch {
+            Err "Git configuration receipt failed: $($_.Exception.Message)"
+            $failedTargets = 1
+        }
+    } else {
+        git config --global init.templateDir $TemplateDir
+    }
 } else {
     Info "  [dry-run] mkdir $TemplateHooksDir"
     Info "  [dry-run] git config --global init.templateDir $TemplateDir"
+}
+if ($ExperimentalReceiptDir -and -not $DryRun) {
+    foreach ($managedFile in $createdHookFiles) {
+        try {
+            Write-AgentShieldCreatedReceipt -Destination $managedFile `
+                -InstalledBytes ([IO.File]::ReadAllBytes($managedFile)) `
+                -ReceiptDir $ExperimentalReceiptDir | Out-Null
+            $guard = $createdHookGuards[$managedFile]
+            Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+            Remove-Item -LiteralPath $guard -Force
+        } catch {
+            Err "Could not record a created hook or scanner file for rollback: $($_.Exception.Message)"
+            $failedTargets = 1
+        }
+    }
 }
 
 Sep

@@ -494,7 +494,7 @@ check("setup" in read("docs/windows-sandbox-followup.md") and
 _unix_install = read("install.sh")
 check("TARGET_HOME" in _unix_install and "SUDO_USER" in _unix_install,
       "install.sh: preserves caller profile under sudo")
-check('--home "$TARGET_HOME"' in _unix_install and "git config --file '$TARGET_HOME/.gitconfig'" in _unix_install,
+check('--home "$TARGET_HOME"' in _unix_install and "git_config_file '$TARGET_HOME/.gitconfig'" in _unix_install,
       "install.sh: applies AI and Git config to target profile, not root")
 check('chown -R "$TARGET_USER" "$user_path"' in _unix_install,
       "install.sh: restores ownership of files created under sudo to user")

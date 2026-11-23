@@ -32,7 +32,8 @@ param(
     # | group (managed) | target id. Default all.
     [string[]] $Only = @("all"),
     [switch]   $ListTargets,
-    [switch]   $DryRun
+    [switch]   $DryRun,
+    [string]   $ReceiptDir
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +52,10 @@ function Get-CurrentOs {
     }
     if ($IsMacOS) { return "darwin" }
     return "linux"
+}
+if ($ReceiptDir) {
+    if ((Get-CurrentOs) -ne 'windows') { throw 'windows_receipt_mode_only' }
+    . (Join-Path $PSScriptRoot 'RollbackReceipt.ps1')
 }
 
 function Test-IsAdmin {
@@ -73,13 +78,112 @@ function Write-Utf8NoBom {
     [System.IO.File]::WriteAllText($Path, $normalized, $enc)
 }
 
+function Get-Sha256Hex {
+    param([Parameter(Mandatory)][string]$Path)
+    $stream = [IO.File]::OpenRead($Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose(); $stream.Dispose() }
+}
+
 function Write-OrPreview {
-    param([string]$Path, [string]$Content, [bool]$Dry, [string]$Verbo = "would write")
+    param([string]$Path, [string]$Content, [bool]$Dry, [string]$Verbo = "would write",
+        [bool]$ReversibleExisting = $false, [string]$KnownPriorPath,
+        [string]$KnownPriorId, [string]$KnownPriorSha256,
+        [byte[]]$ExpectedPriorBytes)
     if ($Dry) {
         Detail "[dry-run] $Verbo $Path ($($Content.Length) bytes)"
         return
     }
-    Write-Utf8NoBom -Path $Path -Content $Content
+    if (-not $ReceiptDir) {
+        Write-Utf8NoBom -Path $Path -Content $Content
+        return
+    }
+    Assert-AgentShieldPrivateReceiptPath -LiteralPath $ReceiptDir -Directory
+    $parent = Split-Path -Parent $Path
+    if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    Assert-AgentShieldDestinationParents -Destination $Path
+    $existing = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $existing) {
+        if ($existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'unsafe_destination_type'
+        }
+        $knownPrior = $false
+        if ($KnownPriorPath) {
+            $prior = Get-Item -LiteralPath $KnownPriorPath -Force -ErrorAction Stop
+            if ($prior.PSIsContainer -or ($prior.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $prior.Length -gt 1048576 -or $KnownPriorSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                (Get-Sha256Hex -Path $KnownPriorPath) -cne $KnownPriorSha256) {
+                throw 'known_prior_payload_invalid'
+            }
+            if ($existing.Length -le 1048576) {
+                $knownPrior = (Get-Sha256Hex -Path $Path) -ceq $KnownPriorSha256
+            }
+        }
+        $priorCreation = $existing.CreationTimeUtc.Ticks
+        $priorWrite = $existing.LastWriteTimeUtc.Ticks
+        $reason = $(if ($ReversibleExisting -or $knownPrior) { 'receipt_incomplete' } else { 'existing_target_has_no_inverse' })
+        $guard = Write-AgentShieldManualReviewReceipt -Destination $Path -ReceiptDir $ReceiptDir -Reason $reason
+        if ($knownPrior -or $null -ne $ExpectedPriorBytes) {
+            $normalized = $Content -replace "`r`n", "`n"
+            $bytes = ([System.Text.UTF8Encoding]::new($false)).GetBytes($normalized)
+            if ($bytes.Length -gt 1048576) { throw 'reversible_payload_too_large' }
+            $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+            try {
+                $locked = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+                if ($locked.CreationTimeUtc.Ticks -ne $priorCreation -or
+                    $locked.LastWriteTimeUtc.Ticks -ne $priorWrite -or $stream.Length -gt 1048576) {
+                    throw 'reversible_destination_changed'
+                }
+                $currentBytes = [byte[]]::new([int]$stream.Length)
+                $offset = 0
+                while ($offset -lt $currentBytes.Length) {
+                    $count = $stream.Read($currentBytes, $offset, $currentBytes.Length - $offset)
+                    if ($count -le 0) { throw 'reversible_destination_changed' }
+                    $offset += $count
+                }
+                if ($null -ne $ExpectedPriorBytes) {
+                    if ($currentBytes.Length -ne $ExpectedPriorBytes.Length) { throw 'reversible_destination_changed' }
+                    for ($index = 0; $index -lt $currentBytes.Length; $index++) {
+                        if ($currentBytes[$index] -ne $ExpectedPriorBytes[$index]) { throw 'reversible_destination_changed' }
+                    }
+                } else {
+                    $sha = [Security.Cryptography.SHA256]::Create()
+                    try { $currentHash = [BitConverter]::ToString($sha.ComputeHash($currentBytes)).Replace('-', '').ToLowerInvariant() }
+                    finally { $sha.Dispose() }
+                    if ($currentHash -cne $KnownPriorSha256) { throw 'known_prior_destination_changed' }
+                }
+                $stream.Position = 0
+                $stream.SetLength(0)
+                $stream.Write($bytes, 0, $bytes.Length)
+                $stream.Flush($true)
+            } finally { $stream.Dispose() }
+        } else {
+            Write-Utf8NoBom -Path $Path -Content $Content
+        }
+        if ($ReversibleExisting) { return $guard }
+        if ($knownPrior) {
+            Write-AgentShieldKnownPriorReceipt -Destination $Path -ReceiptDir $ReceiptDir `
+                -PriorId $KnownPriorId -PriorSha256 $KnownPriorSha256 `
+                -PriorCreationTicks $priorCreation -PriorWriteTicks $priorWrite `
+                -InstalledBytes $bytes | Out-Null
+            Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+            Remove-Item -LiteralPath $guard -Force
+        }
+        return
+    }
+    $normalized = $Content -replace "`r`n", "`n"
+    $bytes = ([System.Text.UTF8Encoding]::new($false)).GetBytes($normalized)
+    $guard = Write-AgentShieldManualReviewReceipt -Destination $Path -ReceiptDir $ReceiptDir `
+        -Reason 'receipt_incomplete'
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) }
+    finally { $stream.Dispose() }
+    Write-AgentShieldCreatedReceipt -Destination $Path -InstalledBytes $bytes -ReceiptDir $ReceiptDir | Out-Null
+    Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+    Remove-Item -LiteralPath $guard -Force
 }
 
 function Read-TextFile {
@@ -321,6 +425,13 @@ function Invoke-Remove {
         return "absent -- nothing to remove"
     }
     if ($Dry) { return "would remove (no longer distributed)" }
+    if ($ReceiptDir) {
+        $item = Get-Item -LiteralPath $Dst -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'unsafe_destination_type'
+        }
+        Write-AgentShieldManualReviewReceipt -Destination $Dst -ReceiptDir $ReceiptDir | Out-Null
+    }
     Remove-Item -LiteralPath $Dst -Force
     return "file removed (no longer distributed)"
 }
@@ -344,7 +455,16 @@ function Invoke-Overwrite {
     if ($Spec.PSObject.Properties.Name -contains "backup") { $doBackup = [bool]$Spec.backup }
     if ($doBackup) { Backup-File -Path $Dst -Dry $Dry }
 
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry
+    $knownPriorPath = $null
+    $knownPriorId = $null
+    $knownPriorSha256 = $null
+    if ($Spec.payload_file -ceq 'statusline/security-status.py') {
+        $knownPriorId = 'claude-statusline-53a8021'
+        $knownPriorSha256 = 'f04381626792cd3278d670784be37e3dada670c3d9b15cae95f56f394aea5246'
+        $knownPriorPath = Join-Path $RootDir 'rollback-payloads\claude-statusline-53a8021.py'
+    }
+    Write-OrPreview -Path $Dst -Content $content -Dry $Dry -KnownPriorPath $knownPriorPath `
+        -KnownPriorId $knownPriorId -KnownPriorSha256 $knownPriorSha256
     return "written (overwrite)"
 }
 
@@ -366,8 +486,28 @@ function Invoke-MergePermissionLists {
     $res = Read-JsonTolerant -Path $Dst -TolerateJsonc $tolerate
     if (-not $res.Ok) { return "preserved (parse failed)" }
     $data = $res.Data
-
-    Backup-File -Path $Dst -Dry $Dry
+    $priorCanonical = ConvertTo-JsonText $data
+    $reversible = $data.Contains($parent) -and $data[$parent] -is [Collections.IDictionary]
+    $priorLengths = [ordered]@{}
+    if ($reversible) {
+        $priorBlock = $data[$parent]
+        foreach ($name in $lists) {
+            if (-not $payload.Contains($name) -or @($payload[$name]).Count -eq 0) { continue }
+            if (-not $priorBlock.Contains($name) -or
+                $priorBlock[$name] -isnot [Collections.IList]) {
+                $reversible = $false
+                break
+            }
+            $priorLengths[$name] = @($priorBlock[$name]).Count
+        }
+        foreach ($key in $payload.Keys) {
+            if ($lists -contains $key) { continue }
+            if (-not $priorBlock.Contains($key) -or
+                (ConvertTo-JsonValue $priorBlock[$key]) -cne (ConvertTo-JsonValue $payload[$key])) {
+                $reversible = $false
+            }
+        }
+    }
 
     if (-not $data.Contains($parent)) {
         $data[$parent] = New-Object System.Collections.Specialized.OrderedDictionary
@@ -391,7 +531,37 @@ function Invoke-MergePermissionLists {
     }
 
     $content = ConvertTo-JsonText $data
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry
+    if ($content -ceq $priorCanonical) { return "unchanged (rules already present)" }
+    $priorBytes = $null
+    $priorCreationTicks = $priorWriteTicks = 0
+    if ($ReceiptDir -and -not $Dry -and $reversible -and $added -gt 0) {
+        $priorItem = Get-Item -LiteralPath $Dst -Force -ErrorAction Stop
+        if (-not $priorItem.PSIsContainer -and
+            ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
+            $priorItem.Length -le 1048576 -and
+            ([Text.UTF8Encoding]::new($false)).GetByteCount($content) -le 1048576) {
+            $candidate = [IO.File]::ReadAllBytes($Dst)
+            $canonical = ([Text.UTF8Encoding]::new($false)).GetBytes($priorCanonical)
+            if ($candidate.Length -eq $canonical.Length -and
+                [Collections.StructuralComparisons]::StructuralEqualityComparer.Equals($candidate, $canonical)) {
+                $priorBytes = $candidate
+                $priorCreationTicks = $priorItem.CreationTimeUtc.Ticks
+                $priorWriteTicks = $priorItem.LastWriteTimeUtc.Ticks
+            }
+        }
+    }
+    if (-not $ReceiptDir) { Backup-File -Path $Dst -Dry $Dry }
+    $guard = Write-OrPreview -Path $Dst -Content $content -Dry $Dry `
+        -ReversibleExisting ($null -ne $priorBytes) -ExpectedPriorBytes $priorBytes
+    if ($null -ne $priorBytes) {
+        $installedBytes = ([Text.UTF8Encoding]::new($false)).GetBytes($content)
+        Write-AgentShieldJsonListReceipt -Destination $Dst -ReceiptDir $ReceiptDir `
+            -PriorBytes $priorBytes -PriorCreationTicks $priorCreationTicks `
+            -PriorWriteTicks $priorWriteTicks -InstalledBytes $installedBytes `
+            -Parent $parent -PriorLengths $priorLengths | Out-Null
+        Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+        Remove-Item -LiteralPath $guard -Force
+    }
     return "merged (+$added rules)"
 }
 
@@ -412,8 +582,20 @@ function Invoke-MergeMcp {
     if (-not $res.Ok) { return "preserved (parse failed)" }
     $data = $res.Data
 
-    Backup-File -Path $Dst -Dry $Dry
-
+    $priorCanonical = ConvertTo-JsonText $data
+    $reversible = $data.Contains($key) -and $data[$key] -is [Collections.IDictionary]
+    $addedServers = [Collections.Generic.List[string]]::new()
+    if ($reversible) {
+        $priorServers = $data[$key]
+        foreach ($name in $payload.Keys) {
+            if ($priorServers.Contains($name)) {
+                if ((ConvertTo-JsonValue $priorServers[$name]) -cne
+                    (ConvertTo-JsonValue $payload[$name])) { $reversible = $false }
+            } else {
+                $addedServers.Add([string]$name)
+            }
+        }
+    }
     if (-not $data.Contains($key)) {
         $data[$key] = New-Object System.Collections.Specialized.OrderedDictionary
     }
@@ -421,7 +603,37 @@ function Invoke-MergeMcp {
     foreach ($k in $payload.Keys) { $servers[$k] = $payload[$k] }
 
     $content = ConvertTo-JsonText $data
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry
+    if ($content -ceq $priorCanonical) { return "unchanged (servers already present)" }
+    $priorBytes = $null
+    $priorCreationTicks = $priorWriteTicks = 0
+    if ($ReceiptDir -and -not $Dry -and $reversible -and $addedServers.Count -gt 0) {
+        $priorItem = Get-Item -LiteralPath $Dst -Force -ErrorAction Stop
+        if (-not $priorItem.PSIsContainer -and
+            ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
+            $priorItem.Length -le 1048576 -and
+            ([Text.UTF8Encoding]::new($false)).GetByteCount($content) -le 1048576) {
+            $candidate = [IO.File]::ReadAllBytes($Dst)
+            $canonical = ([Text.UTF8Encoding]::new($false)).GetBytes($priorCanonical)
+            if ($candidate.Length -eq $canonical.Length -and
+                [Collections.StructuralComparisons]::StructuralEqualityComparer.Equals($candidate, $canonical)) {
+                $priorBytes = $candidate
+                $priorCreationTicks = $priorItem.CreationTimeUtc.Ticks
+                $priorWriteTicks = $priorItem.LastWriteTimeUtc.Ticks
+            }
+        }
+    }
+    if (-not $ReceiptDir) { Backup-File -Path $Dst -Dry $Dry }
+    $guard = Write-OrPreview -Path $Dst -Content $content -Dry $Dry `
+        -ReversibleExisting ($null -ne $priorBytes) -ExpectedPriorBytes $priorBytes
+    if ($null -ne $priorBytes) {
+        $installedBytes = ([Text.UTF8Encoding]::new($false)).GetBytes($content)
+        Write-AgentShieldJsonMcpReceipt -Destination $Dst -ReceiptDir $ReceiptDir `
+            -PriorBytes $priorBytes -PriorCreationTicks $priorCreationTicks `
+            -PriorWriteTicks $priorWriteTicks -InstalledBytes $installedBytes `
+            -Parent $key -AddedServers $addedServers.ToArray() | Out-Null
+        Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+        Remove-Item -LiteralPath $guard -Force
+    }
     return "merged ($($payload.Count) servers)"
 }
 
@@ -441,18 +653,64 @@ function Invoke-MergeMissingKeys {
     $res = Read-JsonTolerant -Path $Dst -TolerateJsonc $tolerate
     if (-not $res.Ok) { return "preserved (parse failed)" }
     $data = $res.Data
+    $priorCanonical = ConvertTo-JsonText $data
 
-    Backup-File -Path $Dst -Dry $Dry
-
-    $added = 0
+    $addedKeys = [Collections.Generic.List[string]]::new()
     foreach ($k in $payload.Keys) {
-        if (-not $data.Contains($k)) { $data[$k] = $payload[$k]; $added++ }
+        if (-not $data.Contains($k)) {
+            $data[$k] = $payload[$k]
+            $addedKeys.Add([string]$k)
+        }
     }
 
+    if ($addedKeys.Count -eq 0) { return "unchanged (keys already present)" }
+
+    $priorBytes = $null
+    $priorCreationTicks = $priorWriteTicks = 0
+    if ($ReceiptDir -and -not $Dry) {
+        $priorItem = Get-Item -LiteralPath $Dst -Force -ErrorAction Stop
+        if (-not $priorItem.PSIsContainer -and
+            ($priorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
+            $priorItem.Length -le 1048576) {
+            $candidate = [IO.File]::ReadAllBytes($Dst)
+            $canonical = ([Text.UTF8Encoding]::new($false)).GetBytes($priorCanonical)
+            if ($candidate.Length -eq $canonical.Length) {
+                $matches = $true
+                for ($index = 0; $index -lt $candidate.Length; $index++) {
+                    if ($candidate[$index] -ne $canonical[$index]) { $matches = $false; break }
+                }
+                if ($matches) {
+                    $priorBytes = $candidate
+                    $priorCreationTicks = $priorItem.CreationTimeUtc.Ticks
+                    $priorWriteTicks = $priorItem.LastWriteTimeUtc.Ticks
+                }
+            }
+        }
+    }
+    if ($ReceiptDir -and -not $Dry -and $null -eq $priorBytes) {
+        Warn '  existing JSON is not canonical or exceeds the receipt limit -- preserved'
+        return 'preserved (no reversible JSON merge)'
+    }
+    if (-not $ReceiptDir) { Backup-File -Path $Dst -Dry $Dry }
+
     $content = ConvertTo-JsonText $data
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry
-    if ($added -eq 0) { return "unchanged (keys already present)" }
-    return "merged (+$added keys)"
+    if ($ReceiptDir -and -not $Dry -and
+        ([Text.UTF8Encoding]::new($false)).GetByteCount($content) -gt 1048576) {
+        Warn '  merged JSON exceeds the receipt limit -- preserved'
+        return 'preserved (no reversible JSON merge)'
+    }
+    $guard = Write-OrPreview -Path $Dst -Content $content -Dry $Dry `
+        -ReversibleExisting ($null -ne $priorBytes) -ExpectedPriorBytes $priorBytes
+    if ($null -ne $priorBytes) {
+        $installedBytes = ([Text.UTF8Encoding]::new($false)).GetBytes($content)
+        Write-AgentShieldJsonKeyReceipt -Destination $Dst -ReceiptDir $ReceiptDir `
+            -PriorBytes $priorBytes -PriorCreationTicks $priorCreationTicks `
+            -PriorWriteTicks $priorWriteTicks -InstalledBytes $installedBytes `
+            -AddedKeys $addedKeys.ToArray() | Out-Null
+        Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+        Remove-Item -LiteralPath $guard -Force
+    }
+    return "merged (+$($addedKeys.Count) keys)"
 }
 
 function Remove-MdBlock {
@@ -516,8 +774,26 @@ function Invoke-MdBlock {
         Warn "  unclosed opening marker in $(Split-Path -Leaf $Dst) -- appending new block"
     }
 
-    $content = $existing.TrimEnd("`r", "`n") + "`n`n" + $block
-    Write-OrPreview -Path $Dst -Content $content -Dry $Dry -Verbo "would append block in"
+    $content = $existing + $(if ($existing.EndsWith("`n")) { "`n" } else { "`n`n" }) + $block
+    $priorBytes = $null
+    if ($ReceiptDir -and -not $Dry -and $first -lt 0) {
+        $priorBytes = [IO.File]::ReadAllBytes($Dst)
+        $candidate = ([Text.UTF8Encoding]::new($false)).GetBytes(($content -replace "`r`n", "`n"))
+        if ($priorBytes.Length -ge $candidate.Length) { $priorBytes = $null }
+        if ($null -ne $priorBytes) {
+            for ($index = 0; $index -lt $priorBytes.Length; $index++) {
+                if ($priorBytes[$index] -ne $candidate[$index]) { $priorBytes = $null; break }
+            }
+        }
+    }
+    $guard = Write-OrPreview -Path $Dst -Content $content -Dry $Dry -Verbo "would append block in" `
+        -ReversibleExisting ($null -ne $priorBytes)
+    if ($null -ne $priorBytes) {
+        Write-AgentShieldAppendedBlockReceipt -Destination $Dst -PriorBytes $priorBytes `
+            -InstalledBytes $candidate -ReceiptDir $ReceiptDir | Out-Null
+        Assert-AgentShieldPrivateReceiptPath -LiteralPath $guard
+        Remove-Item -LiteralPath $guard -Force
+    }
     return "block appended"
 }
 
