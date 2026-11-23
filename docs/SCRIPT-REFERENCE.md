@@ -92,7 +92,7 @@ For reversible writes, a provisional `receipt_incomplete` marker is written
 first and removed after the inverse receipt is saved. If the process stops
 between those steps, the marker blocks batch apply for operator review.
 In experimental mode, installers also mark pre-existing hook, scanner runner,
-Semgrep rule and Git template files before replacing them. Their prior bytes
+and Git template files before replacing them. Their prior bytes
 are not stored in receipts, so they remain manual-review items.
 New hook and scanner destinations receive a provisional marker before copying;
 the marker is cleared only after their created-file receipt is recorded. An
@@ -289,10 +289,10 @@ is no longer part of the scanner baseline. Trivy vulnerability scanning needs
 an already-available local database; a missing database is reported as
 `environment_blocked`, never as a clean dependency result.
 
-Removing the scanner from this release does not uninstall a previously installed
+Removing Semgrep from the baseline does not uninstall a previously installed
 binary or VS Code extension, or edit developer-owned MCP settings. Existing
 Semgrep entries in user profiles require separate review and removal. Gitleaks
-and Trivy do not replace source-code SAST coverage.
+and Trivy do not provide source-code SAST coverage.
 
 | Result | Exit code | Meaning |
 |---|---:|---|
