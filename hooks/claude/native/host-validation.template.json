@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "scope": "claude-native-hook-integration",
+  "status": "not_tested",
+  "platform": null,
+  "architecture": null,
+  "claude_version": null,
+  "artifact_sha256": null,
+  "managed_hook_source_verified": false,
+  "cases": [
+    {"id": "clean_write", "status": "not_tested", "tool_evidence": null, "file_outcome": null},
+    {"id": "secret_write", "status": "not_tested", "tool_evidence": null, "file_outcome": null},
+    {"id": "secret_edit", "status": "not_tested", "tool_evidence": null, "file_outcome": null},
+    {"id": "missing_executable", "status": "not_tested", "tool_evidence": null, "file_outcome": null},
+    {"id": "timeout", "status": "not_tested", "tool_evidence": null, "file_outcome": null},
+    {"id": "invalid_output", "status": "not_tested", "tool_evidence": null, "file_outcome": null}
+  ],
+  "prior_configuration_restored": false
+}

@@ -73,6 +73,15 @@ Headless `ask` behavior is not proof that an interactive approval dialog is
 correct. Treat it as evidence that the rule is applied; verify the interactive
 experience manually.
 
+## Disabled Claude hook pilot
+
+The Claude write-guard pilot under
+[`hooks/claude/`](../hooks/claude/README.md) is source-only and deliberately
+excluded from installers, deployers, packages, targets, and managed payloads.
+Run its synthetic protocol tests only in an isolated, non-production
+environment. Do not use them as evidence that a live client hook is safe to
+activate.
+
 ## Test changes
 
 When adding a validation rule, deliberately reproduce the corresponding defect
