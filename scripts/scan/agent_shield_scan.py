@@ -7,16 +7,11 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 
-CODE_SUFFIXES = {
-    ".c", ".cs", ".cpp", ".go", ".java", ".js", ".jsx", ".php",
-    ".py", ".rb", ".tf", ".ts", ".tsx",
-}
 IAC_SUFFIXES = {".tf", ".yaml", ".yml", ".json"}
 DEPENDENCY_FILES = {
     "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
@@ -41,36 +36,6 @@ def run(command, *, cwd, env=None):
         return 127
 
 
-def run_with_stderr(command, *, cwd, env=None):
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=str(cwd),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        return completed.returncode, completed.stderr.decode("utf-8", "replace")
-    except OSError:
-        return 127, "binary_not_started"
-
-
-def semgrep_failure_detail(stderr):
-    message = stderr.lower()
-    if "read-only file system" in message:
-        return "profile_state_write_denied"
-    if "permission denied" in message or "access is denied" in message:
-        return "permission_denied"
-    if "unknown option" in message or "unrecognized arguments" in message:
-        return "unsupported_cli_option"
-    if "invalid configuration" in message or "invalid yaml" in message:
-        return "local_rule_configuration_error"
-    if "not found" in message:
-        return "scan_target_or_dependency_not_found"
-    return "execution_failed"
-
-
 def git_root(path):
     try:
         completed = subprocess.run(
@@ -86,10 +51,6 @@ def git_root(path):
     if completed.returncode == 0:
         return Path(completed.stdout.strip()).resolve()
     return path
-
-
-def staged_files(root, suffixes):
-    return [name for name in staged_names(root) if Path(name).suffix.lower() in suffixes]
 
 
 def staged_names(root):
@@ -149,43 +110,6 @@ def scan_gitleaks(root, scan_path, staged, config_path=None):
     return result("gitleaks", "environment_blocked", code)
 
 
-def semgrep_env(workspace):
-    env = os.environ.copy()
-    home = str(workspace)
-    env.update({
-        "HOME": home,
-        "USERPROFILE": home,
-        "APPDATA": home,
-        "LOCALAPPDATA": home,
-        "XDG_CONFIG_HOME": home,
-        "XDG_CACHE_HOME": home,
-        "SEMGREP_SETTINGS_FILE": str(workspace / "settings.yml"),
-    })
-    return env
-
-
-def scan_semgrep(root, scan_path, staged, rules_dir):
-    binary = shutil.which("semgrep")
-    if not binary:
-        return result("semgrep", "environment_blocked", detail="binary_not_found")
-    if not rules_dir.is_dir():
-        return result("semgrep", "environment_blocked", detail="local_rules_not_found")
-    targets = staged_files(root, CODE_SUFFIXES) if staged else [str(scan_path)]
-    if not targets:
-        return result("semgrep", "not_applicable", detail="no_supported_source_files_staged")
-    with tempfile.TemporaryDirectory(prefix="agent-shield-semgrep-") as temp:
-        command = [
-            binary, "--config", str(rules_dir), "--error", "--quiet",
-            "--disable-version-check", "--",
-        ] + targets
-        code, stderr = run_with_stderr(command, cwd=root, env=semgrep_env(Path(temp)))
-    if code == 0:
-        return result("semgrep", "clean", code)
-    if code == 1:
-        return result("semgrep", "findings", code)
-    return result("semgrep", "environment_blocked", code, semgrep_failure_detail(stderr))
-
-
 def scan_trivy(root, scan_path, staged):
     binary = shutil.which("trivy")
     if not binary:
@@ -220,16 +144,6 @@ def scan_trivy(root, scan_path, staged):
     if "environment_blocked" in outcomes.values():
         return result("trivy", "environment_blocked", detail=detail)
     return result("trivy", "clean", detail=detail)
-
-
-def default_rules_dir():
-    script_dir = Path(__file__).resolve().parent
-    candidates = (
-        script_dir / "agent-shield-rules",
-        script_dir.parent.parent / "rules" / "semgrep",
-        Path.cwd() / "rules" / "semgrep",
-    )
-    return next((candidate for candidate in candidates if candidate.is_dir()), candidates[0])
 
 
 def overall_status(results):
@@ -275,9 +189,8 @@ def console(payload):
 def parse_args():
     parser = argparse.ArgumentParser(description="Run AgentShield local security scanners.")
     parser.add_argument("--path", default=".", help="Repository or directory to scan (default: current directory).")
-    parser.add_argument("--rules-dir", help="Directory containing reviewed local Semgrep rules.")
     parser.add_argument("--gitleaks-config", help="Optional explicit Gitleaks configuration for a reviewed test or policy.")
-    parser.add_argument("--staged", action="store_true", help="Limit Semgrep and Trivy eligibility to staged files.")
+    parser.add_argument("--staged", action="store_true", help="Limit Trivy eligibility to staged files.")
     parser.add_argument("--state-path", help="Optional path for a compact scan-state JSON record.")
     parser.add_argument("--output-mode", default="Console", choices=("Console", "Json", "Quiet"))
     return parser.parse_args()
@@ -301,11 +214,9 @@ def main():
         return 2
 
     root = git_root(target)
-    rules_dir = Path(args.rules_dir).resolve() if args.rules_dir else default_rules_dir()
     gitleaks_config = Path(args.gitleaks_config).resolve() if args.gitleaks_config else None
     results = [
         scan_gitleaks(root, target, args.staged, gitleaks_config),
-        scan_semgrep(root, target, args.staged, rules_dir),
         scan_trivy(root, target, args.staged),
     ]
     status, exit_code = overall_status(results)

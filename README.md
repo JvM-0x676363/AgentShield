@@ -37,7 +37,7 @@ See [platform notes](docs/PLATFORMS.md) for the current validation status.
   extensions.
 - Denies common secret and credential paths from managed Codex profiles and
   keeps writable Codex sandbox networking disabled by default.
-- Adds Gitleaks, reviewed local Semgrep rules, and Trivy to an audit-only Git
+- Adds Gitleaks and Trivy to an audit-only Git
   pre-commit workflow, with a structured local scanner for terminal and endpoint automation.
 - Provides deterministic Windows PowerShell and Unix shell deployment engines.
 - Validates manifests, policy, payloads, platform behavior, and installer
@@ -53,8 +53,8 @@ then choose the execution model that matches your endpoint. Source commands use
 
 AgentShield configures every supported target by default. Use `-Only` or
 `--only` when the workstation needs a specific agent. Valid selectors are
-listed with `-ListTargets` or `--list-targets`; `claude-code` and
-`claude-desktop` are separate targets.
+listed with `-ListTargets` or `--list-targets`. Claude Desktop has no
+configuration target after removal of the scanner MCP.
 
 Windows PowerShell:
 

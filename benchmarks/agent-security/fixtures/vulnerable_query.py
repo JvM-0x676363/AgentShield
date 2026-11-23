@@ -2,5 +2,5 @@
 
 
 def find_account(cursor, account_id):
-    # Intentionally vulnerable: Semgrep must identify SQL concatenation.
+    # Intentionally vulnerable: a secure implementation must replace SQL concatenation.
     return cursor.execute("SELECT * FROM accounts WHERE id = " + account_id)

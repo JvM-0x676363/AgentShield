@@ -15,7 +15,7 @@ VALID_STRATEGIES = {
 # main script so future CLI validations reuse the same contract instead of
 # duplicating divergent lists.
 SELECTOR_GROUPS = {
-    "claude": ["claude-code", "claude-desktop", "claude-managed"],
+    "claude": ["claude-code", "claude-managed"],
     "codex": ["codex-user", "codex-managed"],
     "antigravity": ["antigravity"],
     "vscode": ["vscode"],

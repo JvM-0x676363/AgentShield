@@ -5,6 +5,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Policy model and control boundaries |
 | [OPERATIONS.md](OPERATIONS.md) | Manual, Intune, and CrowdStrike RTR deployment |
 | [PLATFORMS.md](PLATFORMS.md) | Platform support and known limitations |
+| [GIT-GATE-TUNING.md](GIT-GATE-TUNING.md) | Git approval decisions and remaining gates |
 | [WINDOWS-SANDBOX.md](WINDOWS-SANDBOX.md) | Windows Codex sandbox incident record |
 | [roadmap.md](roadmap.md) | Planned improvements that are not active controls |
 | [pt-BR/README.md](pt-BR/README.md) | Detailed Portuguese reference guide |

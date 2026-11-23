@@ -83,7 +83,7 @@ Usage: bash install.sh [options]
                                --only managed          (enforcement layers only)
                                --only claude-managed   (specific target)
   --list-targets         List available targets and selectors and exit
-  --skip-tools           Do not download gitleaks/semgrep/trivy
+  --skip-tools           Do not download gitleaks/trivy
   --skip-vscode          Do not install VS Code extensions
   --output-mode <mode>   Console (default), Json, or Quiet
   --experimental-receipt-dir <absolute-dir>
@@ -233,7 +233,7 @@ run() { if $DRY_RUN; then echo "  [dry-run] $*"; else eval "$@"; fi; }
 # Per-tool configuration lives in targets/*.json + policy/*; installers
 # no longer carry per-tool blocks. Only check roots: the engine validates
 # each manifest and each referenced payload_file/compose.
-for f in "lib/apply_targets.py" "lib/rollback_receipt.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit" "scripts/scan/agent_shield_scan.py" "rules/semgrep/agentshield-baseline.yml"; do
+for f in "lib/apply_targets.py" "lib/rollback_receipt.py" "lib/security-tools.sh" "policy/core-guidelines.md" "policy/policy.json" "policy/tools.json" "hooks/pre-commit" "scripts/scan/agent_shield_scan.py"; do
     [[ -f "$SCRIPT_DIR/$f" ]] || { error "File not found: $SCRIPT_DIR/$f"; exit 1; }
 done
 [[ -d "$SCRIPT_DIR/targets" ]] || { error "Directory not found: $SCRIPT_DIR/targets"; exit 1; }
@@ -382,9 +382,7 @@ else
 if [[ $EUID -ne 0 ]]; then
     warn "  Script running without root/sudo privileges."
     warn "  Machine-level installation (/usr/local/bin) requires sudo -- skipping this step."
-    warn "  Run: sudo bash install.sh   -- to install gitleaks/trivy/semgrep automatically."
-    warn "  Or install manually:"
-    warn "    pip3 install semgrep==1.175.0"
+    warn "  Run: sudo bash install.sh   -- to install gitleaks/trivy automatically."
 else
     # Shared source: pinned releases and verified SHA-256. Do not use
     # remote scripts or mutable release endpoints on developer machines.
@@ -399,7 +397,6 @@ fi   # end of --skip-tools gate
 echo -e "\n${CYAN}[VS Code Extensions]${NC}"
 
 VS_EXTENSIONS=(
-    "semgrep.semgrep"
     "sonarsource.sonarlint-vscode"
     "usernamehw.errorlens"
     # Snyk removed: requires account (snyk.login/snyk.setToken). Trivy substituted
@@ -460,13 +457,12 @@ fi
 
 PRE_COMMIT="$GIT_HOOKS_DIR/pre-commit"
 SCANNER_RUNNER="$GIT_HOOKS_DIR/agent-shield-scan.py"
-SCANNER_RULES="$GIT_HOOKS_DIR/agent-shield-rules"
 CREATED_HOOK_FILES=()
 CREATED_HOOK_GUARDS=()
 EXISTING_HOOK_FILES=()
 if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
     for managed_file in "$PRE_COMMIT" "$SCANNER_RUNNER" \
-        "$SCANNER_RULES/agentshield-baseline.yml" "$GIT_TEMPLATE/hooks/pre-commit"; do
+        "$GIT_TEMPLATE/hooks/pre-commit"; do
         if [[ -L "$managed_file" ]]; then
             error "Experimental receipt mode refuses a symbolic-link destination"
             exit 2
@@ -521,15 +517,13 @@ else
     fi
     tr -d '\r' < "$SCRIPT_DIR/hooks/pre-commit" > "$PRE_COMMIT"
     chmod +x "$PRE_COMMIT"
-    info "  ✔ $PRE_COMMIT (audit mode: gitleaks + semgrep + trivy)"
+    info "  ✔ $PRE_COMMIT (audit mode: gitleaks + trivy)"
 fi
 
 if $DRY_RUN; then
-    echo "  [dry-run] Would install scanner runner and local Semgrep rules"
+    echo "  [dry-run] scanner runner would be installed"
 else
     install -m 0644 "$SCRIPT_DIR/scripts/scan/agent_shield_scan.py" "$SCANNER_RUNNER"
-    mkdir -p "$SCANNER_RULES"
-    cp -R "$SCRIPT_DIR/rules/semgrep/." "$SCANNER_RULES/"
 fi
 
 # Git init template

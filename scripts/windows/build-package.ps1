@@ -41,7 +41,6 @@ $Files = @(
     "policy/tools.json",
     "hooks/pre-commit",
     "scripts/scan/agent_shield_scan.py",
-    "rules/semgrep/agentshield-baseline.yml",
     "scripts/windows/install.ps1",
     "scripts/windows/deploy.ps1",
     "scripts/windows/agent-shield-scan.ps1",

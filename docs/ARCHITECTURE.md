@@ -39,7 +39,6 @@ agent-shield/
 │   ├── README.md
 │   ├── antigravity.json
 │   ├── claude-code.json
-│   ├── claude-desktop.json
 │   ├── claude-managed.json
 │   ├── codex-managed.json
 │   ├── codex-user.json
@@ -54,7 +53,6 @@ agent-shield/
 │   ├── git_config_receipt.py
 │   ├── rollback_receipt.py
 │   └── security-tools.sh
-├── rules/        reviewed offline Semgrep baseline
 ├── scripts/      Windows, Unix, and scanner entry points
 ├── hooks/        audit hook and installed scanner launcher
 ├── tests/        source, parity, and endpoint verification

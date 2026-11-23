@@ -53,11 +53,6 @@
           "sha256": "94c40e0696e4b907a74b7b2e1438d5d72ebaca83115817407f568a002d520842"
         }
       }
-    },
-    "semgrep": {
-      "version": "1.175.0",
-      "binary": "semgrep",
-      "$comment": "Python has platform-specific transitive dependencies, so the version is pinned here. For hash pinning, promote an approved wheelhouse with requirements --require-hashes."
     }
   }
 }

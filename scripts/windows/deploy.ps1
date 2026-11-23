@@ -175,7 +175,7 @@ if (-not $isAdmin) {
 # --- Validation of source files (before touching any profile) ---
 # Per-tool configuration lives in targets\*.json + policy\*. Only check roots:
 # the engine validates each manifest and each referenced payload_file/compose.
-$required = @("lib\ApplyTargets.ps1", "lib\SecurityTools.ps1", "lib\CodexSandboxProfile.ps1", "policy\core-guidelines.md", "policy\policy.json", "policy\tools.json", "hooks\pre-commit", "scripts\scan\agent_shield_scan.py", "rules\semgrep\agentshield-baseline.yml")
+$required = @("lib\ApplyTargets.ps1", "lib\SecurityTools.ps1", "lib\CodexSandboxProfile.ps1", "policy\core-guidelines.md", "policy\policy.json", "policy\tools.json", "hooks\pre-commit", "scripts\scan\agent_shield_scan.py")
 foreach ($f in $required) {
     if (-not (Test-Path (Join-Path $ScriptDir $f))) {
         Err "File not found: $(Join-Path $ScriptDir $f)"
@@ -192,7 +192,6 @@ if (-not (Test-Path (Join-Path $ScriptDir "targets"))) {
 # guidelines (core + vendor appendix) from policy\.
 $SrcHook       = [System.IO.File]::ReadAllText((Join-Path $ScriptDir "hooks\pre-commit"))
 $SrcScanRunner = Join-Path $ScriptDir "scripts\scan\agent_shield_scan.py"
-$SrcScanRules  = Join-Path $ScriptDir "rules\semgrep"
 
 # Detection functions
 
@@ -482,7 +481,7 @@ foreach ($user in $targetUsers) {
             Info "    vscode: skipped (-SkipVSCode) -- use GPO logon script (see vscode-gpo/README.md)"
         } elseif ($vsCodeBin) {
             # Snyk removed: requires account. Trivy runs locally, no login required.
-            $extensions = @("semgrep.semgrep","sonarsource.sonarlint-vscode","usernamehw.errorlens","AquaSecurityOfficial.trivy-vulnerability-scanner")
+            $extensions = @("sonarsource.sonarlint-vscode","usernamehw.errorlens","AquaSecurityOfficial.trivy-vulnerability-scanner")
             if ($DryRun) {
                 foreach ($ext in $extensions) { Info "      [dry-run] code --install-extension $ext --force" }
             } else {
@@ -521,12 +520,11 @@ foreach ($user in $targetUsers) {
         }
         $userPreCommit = Join-Path $userHooksDir "pre-commit"
         $userScanRunner = Join-Path $userHooksDir "agent-shield-scan.py"
-        $userScanRules = Join-Path $userHooksDir "agent-shield-rules"
         $createdHookFiles = @()
         $createdHookGuards = @{}
         $existingHookFiles = @()
         if ($ExperimentalReceiptDir -and -not $DryRun) {
-            foreach ($directory in @($userHooksDir, $userScanRules, $userTemplateDir,
+            foreach ($directory in @($userHooksDir, $userTemplateDir,
                     (Join-Path $userTemplateDir 'hooks'))) {
                 Assert-AgentShieldDestinationParents -Destination $directory
                 if (Test-Path -LiteralPath $directory) {
@@ -540,7 +538,6 @@ foreach ($user in $targetUsers) {
                 }
             }
             foreach ($managedFile in @($userPreCommit, $userScanRunner,
-                    (Join-Path $userScanRules 'agentshield-baseline.yml'),
                     (Join-Path $userTemplateDir 'hooks\pre-commit'))) {
                 Assert-AgentShieldDestinationParents -Destination $managedFile
                 $existingFile = Get-Item -LiteralPath $managedFile -Force -ErrorAction SilentlyContinue
@@ -563,10 +560,8 @@ foreach ($user in $targetUsers) {
 
         if (-not $DryRun) {
             Copy-Item -LiteralPath $SrcScanRunner -Destination $userScanRunner -Force
-            New-Item -ItemType Directory -Force -Path $userScanRules | Out-Null
-            Copy-Item -Path (Join-Path $SrcScanRules "*") -Destination $userScanRules -Recurse -Force
         } else {
-            Info "    [dry-run] scanner runner and local Semgrep rules would be installed"
+            Info "    [dry-run] scanner runner would be installed"
         }
 
         # Source can be CRLF (checkout on Windows); installed hook must always

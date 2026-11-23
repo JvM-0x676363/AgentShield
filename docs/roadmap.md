@@ -16,16 +16,15 @@ does not require broad access to public registries.
 
 ## Reliable local scanners in sandboxes
 
-`agent-shield-scan` now provides a local Gitleaks, Semgrep, and Trivy baseline.
-It keeps Semgrep state in a temporary directory rather than the user home, uses
-reviewed versioned local rules, scans Trivy IaC and dependency surfaces, reports
+`agent-shield-scan` provides a local Gitleaks and Trivy baseline. It scans
+Trivy IaC and dependency surfaces, reports
 `clean`, `findings`, `not_applicable`, or `environment_blocked`, and is invoked
 by the Git hook.
 
 CI remains the authoritative, blocking gate with current rules and databases.
-Remaining work: validate the wrapper on Windows, Linux/WSL, and macOS, expand
-the reviewed local rule set through normal pull requests, and keep CI rules and
-Trivy databases current.
+Remaining work: validate the wrapper on Windows, Linux/WSL, and macOS;
+evaluate an independently maintained source-code scanner through normal pull
+requests; and keep CI rules and Trivy databases current.
 
 ## Reproducible agent benchmarks
 
@@ -45,3 +44,15 @@ initial evaluation and admission criteria are in
 [CLAUDE-MODS.md](CLAUDE-MODS.md). The only candidate currently under
 consideration is a read-only security-posture panel built from the existing
 sanitized scan-state record. No Mod is deployed by AgentShield.
+
+## Antigravity local commits
+
+Keep `git commit` in Ask. Before considering an opt-in Allow rule, test the
+candidate permission policy in a disposable Git repository and isolated user
+profile on Windows, Linux, and macOS. Record the CLI version, effective rules,
+actual tool decisions, and whether Git changed the fixture. Ordinary commits
+must run without approval; `--no-verify`, `-n`, `--amend`, and push must never
+run automatically. An agent response without a tool event is not evidence of
+the permission decision. The CLI 1.5.11 pilot on Windows only established that
+a benign project Ask regex requested approval; the unsafe bypass prompt was
+refused before a tool call.

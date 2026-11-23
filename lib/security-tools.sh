@@ -142,17 +142,6 @@ install_security_tools_unix() {
     _install_pinned_binary_unix gitleaks "$os-$arch"
     _install_pinned_binary_unix trivy "$os-$arch"
 
-    if command -v semgrep >/dev/null 2>&1; then
-        info "  OK semgrep already installed"
-    elif $DRY_RUN; then
-        echo "  [dry-run] pip3 install semgrep==$(_tools_catalog_value semgrep package version)"
-    elif command -v pip3 >/dev/null 2>&1; then
-        pip3 install --disable-pip-version-check "semgrep==$(_tools_catalog_value semgrep package version)" \
-            || warn "  Failed to install semgrep"
-    else
-        warn "  pip3 not found -- install Python 3 before semgrep"
-    fi
-
     # Trivy's MCP plugin is a separate executable artifact. We do not download it without
     # a pinned version and provenance; MCP remains inactive until an approved enterprise
     # package is added to the catalog.

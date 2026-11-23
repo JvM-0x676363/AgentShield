@@ -116,7 +116,7 @@ Info "Run ID: $script:RunId"
 Write-AgentShieldEvent -Event "start"
 
 # --- Source file validation ---
-$required = @("lib\ApplyTargets.ps1", "lib\SecurityTools.ps1", "lib\CodexSandboxProfile.ps1", "policy\core-guidelines.md", "policy\policy.json", "policy\tools.json", "hooks\pre-commit", "scripts\scan\agent_shield_scan.py", "rules\semgrep\agentshield-baseline.yml")
+$required = @("lib\ApplyTargets.ps1", "lib\SecurityTools.ps1", "lib\CodexSandboxProfile.ps1", "policy\core-guidelines.md", "policy\policy.json", "policy\tools.json", "hooks\pre-commit", "scripts\scan\agent_shield_scan.py")
 foreach ($f in $required) {
     $fullPath = Join-Path $ScriptDir $f
     if (-not (Test-Path $fullPath)) {
@@ -241,7 +241,6 @@ Sep
 Write-Host "`n[VS Code Extensions]" -ForegroundColor Cyan
 
 $vsExts = @(
-    "semgrep.semgrep",
     "sonarsource.sonarlint-vscode",
     "usernamehw.errorlens",
     "AquaSecurityOfficial.trivy-vulnerability-scanner"
@@ -282,15 +281,13 @@ Write-Host "`n[Git Global Hooks - Audit Mode]" -ForegroundColor Cyan
 $PreCommit = Join-Path $HooksDir "pre-commit"
 $srcHook   = Join-Path $ScriptDir "hooks\pre-commit"
 $ScannerRunner = Join-Path $ScriptDir "scripts\scan\agent_shield_scan.py"
-$ScannerRules = Join-Path $ScriptDir "rules\semgrep"
 $InstalledScannerRunner = Join-Path $HooksDir "agent-shield-scan.py"
-$InstalledScannerRules = Join-Path $HooksDir "agent-shield-rules"
 $TemplateHooksDir = Join-Path $TemplateDir "hooks"
 $createdHookFiles = @()
 $createdHookGuards = @{}
 $existingHookFiles = @()
 if ($ExperimentalReceiptDir -and -not $DryRun) {
-    foreach ($directory in @($HooksDir, $InstalledScannerRules, $TemplateDir, $TemplateHooksDir)) {
+    foreach ($directory in @($HooksDir, $TemplateDir, $TemplateHooksDir)) {
         Assert-AgentShieldDestinationParents -Destination $directory
         if (Test-Path -LiteralPath $directory) {
             $existingDirectory = Get-Item -LiteralPath $directory -Force -ErrorAction Stop
@@ -303,7 +300,6 @@ if ($ExperimentalReceiptDir -and -not $DryRun) {
         }
     }
     foreach ($managedFile in @($PreCommit, $InstalledScannerRunner,
-            (Join-Path $InstalledScannerRules 'agentshield-baseline.yml'),
             (Join-Path $TemplateHooksDir 'pre-commit'))) {
         Assert-AgentShieldDestinationParents -Destination $managedFile
         $existingFile = Get-Item -LiteralPath $managedFile -Force -ErrorAction SilentlyContinue
@@ -330,15 +326,10 @@ if (-not $DryRun) {
     if (-not $ExperimentalReceiptDir) { git config --global core.hooksPath $HooksDir }
     if ($ExperimentalReceiptDir) { Assert-AgentShieldDestinationParents -Destination $InstalledScannerRunner }
     Copy-Item -LiteralPath $ScannerRunner -Destination $InstalledScannerRunner -Force
-    New-Item -ItemType Directory -Force -Path $InstalledScannerRules | Out-Null
-    if ($ExperimentalReceiptDir) {
-        Assert-AgentShieldDestinationParents -Destination (Join-Path $InstalledScannerRules 'agentshield-baseline.yml')
-    }
-    Copy-Item -Path (Join-Path $ScannerRules "*") -Destination $InstalledScannerRules -Recurse -Force
 } else {
     Info "  [dry-run] mkdir $HooksDir"
     Info "  [dry-run] git config --global core.hooksPath $HooksDir"
-    Info "  [dry-run] install scanner runner and local Semgrep rules"
+    Info "  [dry-run] install scanner runner"
 }
 
 $srcHookLf    = [System.IO.File]::ReadAllText($srcHook) -replace "`r`n", "`n"
@@ -366,7 +357,7 @@ if ($hookIsCurrent) {
     Info "Installing pre-commit hook from hooks\pre-commit (audit only)..."
     if ($ExperimentalReceiptDir) { Assert-AgentShieldDestinationParents -Destination $PreCommit }
     Write-ShellScript -Path $PreCommit -Content $srcHookLf
-    Info "  OK created at $PreCommit (audit mode: gitleaks + semgrep + trivy)"
+    Info "  OK created at $PreCommit (audit mode: gitleaks + trivy)"
 }
 
 Info "Configuring init.templateDir -> $TemplateDir"

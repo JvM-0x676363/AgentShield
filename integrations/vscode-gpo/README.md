@@ -114,12 +114,11 @@ GPO logon scripts adhere to machine Execution Policy. If set to
 
 ### Why online mode is preferred
 
-The extensions total **~234 MB** + Trivy:
+The extensions total **~190 MB**:
 
 | Extension | Size |
 |---|---|
 | sonarsource.sonarlint-vscode | ~170 MB (bundles embedded analyzers) |
-| semgrep.semgrep | ~64 MB |
 | AquaSecurityOfficial.trivy-vulnerability-scanner | ~20 MB |
 | usernamehw.errorlens | 0.1 MB |
 
@@ -228,14 +227,13 @@ corporate catalog exists.
 **On workstation after logon:**
 
 ```powershell
-code --list-extensions | Select-String -Pattern 'semgrep|sonarlint|errorlens|trivy'
+code --list-extensions | Select-String -Pattern 'sonarlint|errorlens|trivy'
 ```
 
 Expected output:
 
 ```text
 AquaSecurityOfficial.trivy-vulnerability-scanner
-semgrep.semgrep
 sonarsource.sonarlint-vscode
 usernamehw.errorlens
 ```

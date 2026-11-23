@@ -8,10 +8,9 @@ fi
 HOOK_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
 STATE_DIR="${SECURITY_HOOK_STATE_DIR:-$HOME/.git-hooks}"
 RUNNER="$HOOK_DIR/agent-shield-scan.py"
-RULES_DIR="$HOOK_DIR/agent-shield-rules"
 
 run_scan() {
-  "$@" "$RUNNER" --staged --rules-dir "$RULES_DIR" \
+  "$@" "$RUNNER" --staged \
     --state-path "$STATE_DIR/last-scan.json" --output-mode Console
 }
 
@@ -25,7 +24,7 @@ if command -v python3 >/dev/null 2>&1; then
 elif command -v python >/dev/null 2>&1; then
   run_scan python || true
 elif command -v py >/dev/null 2>&1; then
-  py -3 "$RUNNER" --staged --rules-dir "$RULES_DIR" \
+  py -3 "$RUNNER" --staged \
     --state-path "$STATE_DIR/last-scan.json" --output-mode Console || true
 else
   echo "[AGENTSHIELD SCAN] result: environment_blocked (python3_not_found)"

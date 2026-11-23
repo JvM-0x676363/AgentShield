@@ -167,6 +167,8 @@
             "Bash(git push --force:*)",
             "Bash(git config --global core.hooksPath:*)",
             "Bash(git commit --no-verify:*)",
+            "Bash(git commit *--no-verify*)",
+            "Bash(git commit *-n*)",
             "Bash(git push -f:*)",
             "Bash(git filter-branch:*)",
             "Bash(kubectl get secret:*)",
@@ -228,7 +230,7 @@
             "Bash(aws ec2 terminate-instances:*)",
             "Bash(aws cloudformation delete-stack:*)",
             "Bash(git push:*)",
-            "Bash(git commit:*)",
+            "Bash(git commit *--amend*)",
             "Bash(git clone:*)",
             "Bash(git config --global:*)",
             "Bash(git submodule update:*)",
@@ -250,13 +252,13 @@
             "Bash(git diff:*)",
             "Bash(git log:*)",
             "Bash(git add:*)",
+            "Bash(git commit:*)",
             "Bash(git branch:*)",
             "Bash(npm run:*)",
             "Bash(npm audit:*)",
             "Bash(npm test:*)",
             "Bash(docker ps:*)",
             "Bash(docker images:*)",
-            "Bash(semgrep:*)",
             "Bash(trivy:*)",
             "Bash(gitleaks:*)",
             "Bash(docker version:*)",
@@ -276,30 +278,6 @@
             "Bash(git rev-parse:*)",
             "Bash(git ls-files:*)"
           ]
-        }
-      }
-    },
-    {
-      "dest": {
-        "windows": "${HOME}/.claude.json",
-        "linux": "${HOME}/.claude.json",
-        "darwin": "${HOME}/.claude.json"
-      },
-      "format": "json",
-      "strategy": "merge-mcp",
-      "mcp_key": "mcpServers",
-      "$comment": "User profile root, NOT inside .claude/. This file also stores CLI runtime state -- therefore merge, never overwrite.",
-      "payload": {
-        "mcpServers": {
-          "semgrep": {
-            "command": "semgrep",
-            "args": [
-              "mcp"
-            ],
-            "env": {
-              "SEMGREP_RULES": "p/default"
-            }
-          }
         }
       }
     }

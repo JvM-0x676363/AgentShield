@@ -14,10 +14,6 @@
     "merge-missing-keys, not merge or overwrite: it adds only missing keys",
     "and never replaces a value already chosen by the developer.",
     "",
-    "semgrep.scan.configuration must stay fixed. The default falls back to",
-    "--config auto. The current p/default value still depends on registry/cache;",
-    "offline local rules are tracked in docs/roadmap.md.",
-    "",
     "VS Code settings.json accepts comments (JSONC). A strict JSON parser fails",
     "on them, so the engine preserves the file instead of overwriting it when",
     "parsing fails.",
@@ -46,9 +42,6 @@
       "strategy": "merge-missing-keys",
       "tolerate_jsonc": true,
       "payload": {
-        "semgrep.path": "semgrep",
-        "semgrep.scan.configuration": ["p/default"],
-        "semgrep.metrics": false,
         "sonarlint.disableTelemetry": true
       }
     },
@@ -61,9 +54,6 @@
       "tolerate_jsonc": true,
       "only_if_parent_exists": true,
       "payload": {
-        "semgrep.path": "semgrep",
-        "semgrep.scan.configuration": ["p/default"],
-        "semgrep.metrics": false,
         "sonarlint.disableTelemetry": true
       }
     },
@@ -76,9 +66,6 @@
       "tolerate_jsonc": true,
       "only_if_parent_exists": true,
       "payload": {
-        "semgrep.path": "semgrep",
-        "semgrep.scan.configuration": ["p/default"],
-        "semgrep.metrics": false,
         "sonarlint.disableTelemetry": true
       }
     }

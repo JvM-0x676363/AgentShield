@@ -39,5 +39,4 @@ if [[ -z "$PYTHON" ]]; then
     blocked "python3_not_found"
 fi
 
-exec "$PYTHON" "$ROOT/scripts/scan/agent_shield_scan.py" \
-    --rules-dir "$ROOT/rules/semgrep" "$@"
+exec "$PYTHON" "$ROOT/scripts/scan/agent_shield_scan.py" "$@"
