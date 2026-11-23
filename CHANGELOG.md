@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Added a disabled Claude write-guard pilot with synthetic tests and a Windows
+  build helper. It is not included in installers, deployment targets, endpoint
+  packages, or managed payloads.
 - Split vendor-specific guidance out of always-loaded Claude Code, Codex, and
   Antigravity context. Short pointers now reference adjacent vendor appendices;
   managed Claude also installs the security review playbook beside its context

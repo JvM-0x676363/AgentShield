@@ -23,7 +23,12 @@ not belong in the default deployment. Any future generic hook must:
 - Test synthetic fixtures in CI without depending on another checkout.
 - Cover packaging and endpoint detection on Windows, Linux and macOS.
 
-No new hook is enabled by the instruction split. Provider-specific adapters
-need separate contracts and tests before deployment. Measure context size
-separately from token usage and cached billing; reduced text alone does not
-prove behavioral equivalence.
+No new hook is enabled by the instruction split. The disabled Claude write-guard
+pilot is documented in [hooks/claude/README.md](../hooks/claude/README.md).
+It is not included in installers, deployment targets, endpoint packages, or
+managed payloads. Its configuration generator accepts only isolated testing;
+activation remains pending a separately reviewed launcher and live client tests.
+
+Provider-specific adapters need separate contracts and tests before deployment.
+Measure context size separately from token usage and cached billing; reduced
+text alone does not prove behavioral equivalence.

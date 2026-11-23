@@ -1102,6 +1102,56 @@ for tool in sorted(coverage):
     check(os.path.isfile(os.path.join(ROOT, rel)), "appendix exists: %s" % rel)
 
 # =============================================================================
+section("6a. Disabled Claude hook pilot remains source-only")
+# =============================================================================
+_hook_pilot_files = (
+    "hooks/claude/README.md",
+    "hooks/claude/secret-write-guard.cjs",
+    "hooks/claude/managed-hook-config.cjs",
+    "hooks/claude/runtime-preflight.cjs",
+    "hooks/claude/RuntimePreflight.ps1",
+    "hooks/claude/native/main.go",
+    "tests/hooks/secret-write-guard.test.cjs",
+    "tests/hooks/managed-hook-config.test.cjs",
+    "tests/hooks/runtime-preflight.test.cjs",
+    "tests/hooks/runtime-environment.test.cjs",
+    "tests/hooks/runtime-preflight-windows.test.ps1",
+    "tests/hooks/native-guard.test.cjs",
+    "scripts/windows/build-managed-hook-pilot.ps1",
+)
+for _rel in _hook_pilot_files:
+    check(os.path.isfile(os.path.join(ROOT, _rel)),
+          "  disabled hook pilot file exists: %s" % _rel)
+
+_hook_config = read("hooks/claude/managed-hook-config.cjs")
+check('purpose !== "isolated-test"' in _hook_config and
+      "managed_activation_not_ready" in _hook_config,
+      "  hook config rejects non-test activation purposes")
+
+_hook_build = read("scripts/windows/build-managed-hook-pilot.ps1")
+check("production_ready = $false" in _hook_build and
+      "purpose = 'isolated-pilot'" in _hook_build,
+      "  hook pilot build metadata remains non-production")
+
+_hook_distribution_files = (
+    "install.sh", "deploy.sh", "install.ps1", "deploy.ps1", "build-package.ps1",
+)
+_hook_distribution_terms = (
+    "hooks/claude", "build-managed-hook-pilot", "managed-hook-config.cjs",
+)
+for _rel in _hook_distribution_files:
+    _text = read(_rel)
+    _found = [term for term in _hook_distribution_terms if term in _text]
+    check(not _found, "  %s does not distribute disabled hook pilot" % _rel,
+          _found or "")
+
+for _mid, _manifest in manifests.items():
+    _serialized = json.dumps(_manifest, sort_keys=True)
+    _found = [term for term in _hook_distribution_terms if term in _serialized]
+    check(not _found, "  %s target does not enable disabled hook pilot" % _mid,
+          _found or "")
+
+# =============================================================================
 section("6b. README inventory matches disk")
 # =============================================================================
 # Documentation drift is the same problem the rest of this file addresses:
