@@ -1152,6 +1152,65 @@ for _mid, _manifest in manifests.items():
           _found or "")
 
 # =============================================================================
+section("6a1. Optional Claude Mods panel remains local and read-only")
+# =============================================================================
+_mod_files = (
+    "docs/CLAUDE-MODS.md",
+    "integrations/claude-mods/README.md",
+    "integrations/claude-mods/.claude-plugin/plugin.json",
+    "integrations/claude-mods/.claude-plugin/marketplace.json",
+    "integrations/claude-mods/hooks/hooks.json",
+    "integrations/claude-mods/hooks/security-posture-panel.mjs",
+    "integrations/claude-mods/tests/security-posture-panel.test.ts",
+)
+for _rel in _mod_files:
+    check(os.path.isfile(os.path.join(ROOT, _rel)),
+          "  Claude Mods panel file exists: %s" % _rel)
+
+_mod_source = read("integrations/claude-mods/hooks/security-posture-panel.mjs")
+_mod_test = read("integrations/claude-mods/tests/security-posture-panel.test.ts")
+_mod_readme = read("integrations/claude-mods/README.md")
+check('const SCANNER_NAMES = ["gitleaks", "trivy"];' in _mod_source,
+      "  Claude Mods panel uses current scanner baseline")
+check("semgrep" not in (_mod_source + _mod_test + _mod_readme).lower(),
+      "  Claude Mods panel has no retired scanner reference")
+check('STATE_SUFFIX = "/.git-hooks/last-scan.json"' in _mod_source and
+      "MAX_STATE_BYTES = 8192" in _mod_source and
+      'runner !== "agent-shield-scan"' in _mod_source,
+      "  Claude Mods panel bounds and validates scan state")
+
+_mod_calls = set(re.findall(r"\$\.(\w+)\.(\w+)", _mod_source))
+_mod_allowed_calls = {
+    ("command", "register"), ("env", "get"), ("fs", "read"),
+    ("ui", "open"), ("ui", "resolve"),
+}
+check(_mod_calls <= _mod_allowed_calls,
+      "  Claude Mods panel uses read-only approved APIs",
+      sorted(_mod_calls - _mod_allowed_calls) or "")
+check('on("tool.' not in _mod_source and
+      'on("permission.' not in _mod_source and
+      'on("prompt.' not in _mod_source,
+      "  Claude Mods panel does not intercept security decisions")
+
+_mod_distribution_files = (
+    "install.sh", "deploy.sh", "install.ps1", "deploy.ps1", "build-package.ps1",
+)
+_mod_distribution_terms = (
+    "integrations/claude-mods", "agentshield-security-posture",
+)
+for _rel in _mod_distribution_files:
+    _text = read(_rel)
+    _found = [term for term in _mod_distribution_terms if term in _text]
+    check(not _found, "  %s does not distribute Claude Mods panel" % _rel,
+          _found or "")
+
+for _mid, _manifest in manifests.items():
+    _serialized = json.dumps(_manifest, sort_keys=True)
+    _found = [term for term in _mod_distribution_terms if term in _serialized]
+    check(not _found, "  %s target does not enable Claude Mods panel" % _mid,
+          _found or "")
+
+# =============================================================================
 section("6b. README inventory matches disk")
 # =============================================================================
 # Documentation drift is the same problem the rest of this file addresses:
@@ -2396,7 +2455,7 @@ def _anchor(titulo):
 
 _docs_md = ["README.md", ARCHITECTURE_DOC, OPERATIONS_DOC, "tests/README.md", "targets/README.md",
             "integrations/bitbucket/README.md", "integrations/vscode-gpo/README.md", "docs/README.md",
-            "docs/ARCHITECTURE.md", "docs/OPERATIONS.md", "docs/PLATFORMS.md"]
+            "docs/ARCHITECTURE.md", "docs/CLAUDE-MODS.md", "docs/OPERATIONS.md", "docs/PLATFORMS.md"]
 _total_links = 0
 for _f in _docs_md:
     if not os.path.isfile(os.path.join(ROOT, _f)):

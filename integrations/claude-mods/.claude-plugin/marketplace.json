@@ -1,0 +1,13 @@
+{
+  "name": "agentshield-local",
+  "owner": {
+    "name": "AgentShield contributors"
+  },
+  "description": "Local-only marketplace for the reviewed AgentShield Claude Code Mod.",
+  "plugins": [
+    {
+      "name": "agentshield-security-posture",
+      "source": "."
+    }
+  ]
+}
