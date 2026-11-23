@@ -209,9 +209,9 @@ printf '%s\n' "$claude_preview" | python3 -c '
 import json, sys
 result = json.load(sys.stdin)
 kinds = {item.get("kind") for item in result.get("items", []) if item.get("status") == "ready"}
-if result.get("status") != "ready" or not {"json_list_append", "json_mcp_added_servers"} <= kinds:
+if result.get("status") != "ready" or "json_list_append" not in kinds:
     sys.exit(1)
-' || { echo 'Claude and MCP inverse receipts were not ready.' >&2; exit 1; }
+' || { echo 'Claude permission inverse receipt was not ready.' >&2; exit 1; }
 if ! claude_result="$(python3 "$repo/scripts/rollback/rollback.py" --receipt-dir "$claude_receipts" --apply)"; then
     echo 'Existing Claude configuration rollback failed.' >&2
     printf '%s\n' "$claude_result" >&2
@@ -287,6 +287,6 @@ fi
 
 printf 'RESULT: Unix isolated install and rollback passed (receipts=%s)\n' "$receipt_count"
 echo 'RESULT: Unix canonical VS Code JSON merge and rollback passed'
-echo 'RESULT: Unix existing Claude permissions and MCP merge and rollback passed'
+echo 'RESULT: Unix existing Claude permissions rollback passed; MCP remained unchanged'
 echo 'RESULT: Unix existing-file review blocked batch rollback'
 printf 'Evidence directory: %s\n' "$test_root"

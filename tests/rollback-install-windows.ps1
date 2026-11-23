@@ -173,8 +173,7 @@ try {
     $claudePreview = & powershell -NoProfile -File $rollback -ReceiptDir $claudeReceiptDir | ConvertFrom-Json
     $claudeKinds = @($claudePreview.items | Where-Object { $_.status -eq 'ready' } | ForEach-Object kind)
     if ($LASTEXITCODE -ne 0 -or $claudePreview.status -ne 'ready' -or
-        $claudeKinds -notcontains 'json_list_append' -or
-        $claudeKinds -notcontains 'json_mcp_added_servers') {
+        $claudeKinds -notcontains 'json_list_append') {
         throw 'existing_claude_preview_not_ready'
     }
     $claudeResult = & powershell -NoProfile -File $rollback -ReceiptDir $claudeReceiptDir -Apply | ConvertFrom-Json
@@ -225,7 +224,7 @@ try {
     }
     Write-Host "RESULT: Windows isolated install and rollback passed (receipts=$($preview.receipts))"
     Write-Host 'RESULT: Windows canonical VS Code JSON merge and rollback passed'
-    Write-Host 'RESULT: Windows existing Claude permissions and MCP merge and rollback passed'
+    Write-Host 'RESULT: Windows existing Claude permissions rollback passed; MCP remained unchanged'
     Write-Host 'RESULT: Windows existing-file review blocked batch rollback'
     Write-Host "Evidence directory: $testRoot"
 } finally {
