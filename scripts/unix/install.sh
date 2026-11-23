@@ -22,6 +22,14 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 sep()   { echo -e "  -----------------------------------------------"; }
 
+# An installer may be launched from a Git worktree shell that exports GIT_DIR.
+# Explicit config-file changes must never depend on that unrelated repository.
+git_config_file() {
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+        -u GIT_PREFIX -u GIT_CEILING_DIRECTORIES -u GIT_CONFIG \
+        -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS git config --file "$@"
+}
+
 # `sudo bash install.sh` changes $HOME to /root, but this is a SINGLE developer's
 # installer. Derive caller profile so we don't install guidelines, hooks, and global
 # Git configuration into root. deploy.sh remains the path for multi-profile rollouts.
@@ -452,7 +460,7 @@ emit_event phase git_hooks
 
 run "mkdir -p '$GIT_HOOKS_DIR'"
 if [[ -z "$EXPERIMENTAL_RECEIPT_DIR" || "$DRY_RUN" == true ]]; then
-    run "git config --file '$TARGET_HOME/.gitconfig' core.hooksPath '$GIT_HOOKS_DIR'"
+    run "git_config_file '$TARGET_HOME/.gitconfig' core.hooksPath '$GIT_HOOKS_DIR'"
 fi
 
 PRE_COMMIT="$GIT_HOOKS_DIR/pre-commit"
@@ -541,7 +549,7 @@ if [[ -n "$EXPERIMENTAL_RECEIPT_DIR" && "$DRY_RUN" == false ]]; then
         FAILED_TARGETS=1
     fi
 else
-    run "git config --file '$TARGET_HOME/.gitconfig' init.templateDir '$GIT_TEMPLATE'"
+    run "git_config_file '$TARGET_HOME/.gitconfig' init.templateDir '$GIT_TEMPLATE'"
 fi
 
 # Admin pass wrote files inside another user's profile. Return ownership,

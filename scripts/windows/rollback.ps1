@@ -597,9 +597,9 @@ try {
                     }
                     if ($entry.previous_value -ceq $entry.installed_value) { continue }
                     if ($null -eq $entry.previous_value) {
-                        & git config --file $destination --unset-all $key 2>$null | Out-Null
+                        Invoke-AgentShieldGitConfig -Arguments @('--file', $destination, '--unset-all', $key) 2>$null | Out-Null
                     } else {
-                        & git config --file $destination $key ([string]$entry.previous_value) 2>$null | Out-Null
+                        Invoke-AgentShieldGitConfig -Arguments @('--file', $destination, $key, [string]$entry.previous_value) 2>$null | Out-Null
                     }
                     if ($LASTEXITCODE -ne 0 -or
                         (Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $key) -cne $entry.previous_value) {
@@ -612,9 +612,9 @@ try {
                 throw 'git_config_value_changed'
             }
             if ($null -eq $operation.previous_value) {
-                & git config --file $destination --unset-all $operation.key 2>$null | Out-Null
+                Invoke-AgentShieldGitConfig -Arguments @('--file', $destination, '--unset-all', $operation.key) 2>$null | Out-Null
             } else {
-                & git config --file $destination $operation.key ([string]$operation.previous_value) 2>$null | Out-Null
+                Invoke-AgentShieldGitConfig -Arguments @('--file', $destination, $operation.key, [string]$operation.previous_value) 2>$null | Out-Null
             }
             if ($LASTEXITCODE -ne 0 -or
                 (Get-AgentShieldGitConfigValue -ConfigPath $destination -Key $operation.key) -cne $operation.previous_value) {

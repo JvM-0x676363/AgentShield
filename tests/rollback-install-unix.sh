@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+git_config_file() {
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+        -u GIT_PREFIX -u GIT_CEILING_DIRECTORIES -u GIT_CONFIG \
+        -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS git config --file "$@"
+}
+
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ "$(id -u)" -eq 0 ]]; then
     echo 'Run this test without root privileges.' >&2
@@ -96,7 +102,7 @@ for relative in .claude/vendor-claude-code.md .git-hooks/pre-commit \
     fi
 done
 for key in core.hooksPath init.templateDir; do
-    if git config --file "$test_home/.gitconfig" --get-all "$key" >/dev/null 2>&1; then
+    if git_config_file "$test_home/.gitconfig" --get-all "$key" >/dev/null 2>&1; then
         echo 'An installed Git setting survived rollback.' >&2
         printf 'Evidence directory: %s\n' "$test_root" >&2
         exit 1

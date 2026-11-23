@@ -19,6 +19,18 @@ from git_config_receipt import read_key, set_pair_with_receipt, set_with_receipt
 import apply_targets as target_engine  # noqa: E402
 
 
+def git_config(*arguments, **kwargs):
+    """Exercise explicit config files without inheriting a repository context."""
+    environment = os.environ.copy()
+    for name in (
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+        "GIT_PREFIX", "GIT_CEILING_DIRECTORIES", "GIT_CONFIG",
+        "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+    ):
+        environment.pop(name, None)
+    return subprocess.run(["git", "config", *arguments], env=environment, **kwargs)
+
+
 @unittest.skipIf(os.name == "nt", "Unix receipt permissions required")
 class CreatedFileReceiptTests(unittest.TestCase):
     def setUp(self):
@@ -621,8 +633,8 @@ class CreatedFileReceiptTests(unittest.TestCase):
     def test_git_key_restores_without_touching_other_key(self):
         config = pathlib.Path(self.temp.name) / "gitconfig"
         for key, value in (("user.name", "kept"), ("core.hooksPath", "/old-hooks")):
-            result = subprocess.run(
-                ["git", "config", "--file", str(config), key, value],
+            result = git_config(
+                "--file", str(config), key, value,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
             )
             self.assertEqual(result.returncode, 0)
@@ -636,8 +648,8 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
         self.assertEqual(json.loads(restored.stdout)["status"], "restored")
         self.assertEqual(read_key(str(config), "core.hooksPath"), "/old-hooks")
-        untouched = subprocess.run(
-            ["git", "config", "--file", str(config), "--get", "user.name"],
+        untouched = git_config(
+            "--file", str(config), "--get", "user.name",
             capture_output=True, text=True, check=False,
         )
         self.assertEqual(untouched.stdout.strip(), "kept")
@@ -646,8 +658,8 @@ class CreatedFileReceiptTests(unittest.TestCase):
         config = pathlib.Path(self.temp.name) / "gitconfig"
         set_with_receipt(str(config), "init.templateDir", "/managed-template", str(self.receipts))
         receipt = next(self.receipts.glob("*.json"))
-        changed = subprocess.run(
-            ["git", "config", "--file", str(config), "init.templateDir", "/user-template"],
+        changed = git_config(
+            "--file", str(config), "init.templateDir", "/user-template",
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
         )
         self.assertEqual(changed.returncode, 0)
@@ -658,11 +670,26 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.assertEqual(json.loads(refused.stdout)["status"], "blocked")
         self.assertEqual(read_key(str(config), "init.templateDir"), "/user-template")
 
+    def test_git_pair_ignores_inherited_repository_context(self):
+        config = pathlib.Path(self.temp.name) / "gitconfig"
+        with mock.patch.dict(os.environ, {"GIT_DIR": "/nonexistent/foreign-worktree"}):
+            set_pair_with_receipt(str(config), {
+                "core.hooksPath": "/new-hooks", "init.templateDir": "/new-template",
+            }, str(self.receipts))
+            receipt = next(self.receipts.glob("*.json"))
+            restored = subprocess.run([
+                sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
+                "--receipt", str(receipt), "--apply",
+            ], capture_output=True, text=True, check=False)
+        self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+        self.assertIsNone(read_key(str(config), "core.hooksPath"))
+        self.assertIsNone(read_key(str(config), "init.templateDir"))
+
     def test_git_pair_restores_both_keys(self):
         config = pathlib.Path(self.temp.name) / "gitconfig"
         for key, value in (("user.name", "kept"), ("core.hooksPath", "/old-hooks")):
-            result = subprocess.run(["git", "config", "--file", str(config), key, value],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            result = git_config("--file", str(config), key, value,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             self.assertEqual(result.returncode, 0)
         set_pair_with_receipt(str(config), {
             "core.hooksPath": "/new-hooks", "init.templateDir": "/new-template",
@@ -677,8 +704,8 @@ class CreatedFileReceiptTests(unittest.TestCase):
         self.assertEqual(json.loads(restored.stdout)["status"], "restored")
         self.assertEqual(read_key(str(config), "core.hooksPath"), "/old-hooks")
         self.assertIsNone(read_key(str(config), "init.templateDir"))
-        self.assertEqual(subprocess.run(["git", "config", "--file", str(config), "--get", "user.name"],
-                                        capture_output=True, text=True, check=False).stdout.strip(), "kept")
+        self.assertEqual(git_config("--file", str(config), "--get", "user.name",
+                                    capture_output=True, text=True, check=False).stdout.strip(), "kept")
 
     def test_git_pair_receipt_failure_keeps_manual_review_marker(self):
         config = pathlib.Path(self.temp.name) / "gitconfig"
@@ -699,8 +726,8 @@ class CreatedFileReceiptTests(unittest.TestCase):
             "core.hooksPath": "/new-hooks", "init.templateDir": "/new-template",
         }, str(self.receipts))
         receipt = next(self.receipts.glob("*.json"))
-        subprocess.run(["git", "config", "--file", str(config), "core.hooksPath", "/user-hooks"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        git_config("--file", str(config), "core.hooksPath", "/user-hooks",
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         refused = subprocess.run([
             sys.executable, str(ROOT / "scripts" / "rollback" / "rollback.py"),
             "--receipt", str(receipt), "--apply",

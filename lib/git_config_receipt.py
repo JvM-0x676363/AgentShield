@@ -11,6 +11,19 @@ from rollback_receipt import clear_provisional, ensure_private_directory, record
 
 
 SUPPORTED_KEYS = frozenset(("core.hooksPath", "init.templateDir"))
+_GIT_CONTEXT_ENV = frozenset((
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+    "GIT_PREFIX", "GIT_CEILING_DIRECTORIES", "GIT_CONFIG",
+    "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+))
+
+
+def _run_git_config(arguments, **kwargs):
+    """Run an explicit config-file operation outside any inherited repo context."""
+    environment = os.environ.copy()
+    for name in _GIT_CONTEXT_ENV:
+        environment.pop(name, None)
+    return subprocess.run(["git", "config", *arguments], env=environment, **kwargs)
 
 
 def _regular_or_absent(path):
@@ -33,8 +46,8 @@ def read_key(config_path, key):
     if key not in SUPPORTED_KEYS:
         raise ValueError("unsupported_git_key")
     _regular_or_absent(config_path)
-    result = subprocess.run(
-        ["git", "config", "--file", config_path, "--null", "--get-all", key],
+    result = _run_git_config(
+        ["--file", config_path, "--null", "--get-all", key],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
     )
     if result.returncode == 1 and not result.stdout:
@@ -63,8 +76,8 @@ def set_with_receipt(config_path, key, installed_value, receipt_dir):
     if previous == installed_value:
         return None
     guard = record_manual_review(config_path, receipt_dir, "receipt_incomplete")
-    result = subprocess.run(
-        ["git", "config", "--file", config_path, key, installed_value],
+    result = _run_git_config(
+        ["--file", config_path, key, installed_value],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
     )
     if result.returncode != 0 or read_key(config_path, key) != installed_value:
@@ -86,7 +99,7 @@ def restore_key(config_path, key, installed_value, previous_value, identity):
         command = ["git", "config", "--file", config_path, "--unset-all", key]
     else:
         command = ["git", "config", "--file", config_path, key, previous_value]
-    result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    result = _run_git_config(command[2:], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     if result.returncode != 0:
         raise ValueError("git_config_restore_failed")
     if read_key(config_path, key) != previous_value:
@@ -114,8 +127,8 @@ def set_pair_with_receipt(config_path, installed_values, receipt_dir):
     for key in PAIR_KEYS:
         if previous[key] == installed_values[key]:
             continue
-        result = subprocess.run(
-            ["git", "config", "--file", config_path, key, installed_values[key]],
+        result = _run_git_config(
+            ["--file", config_path, key, installed_values[key]],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
         )
         if result.returncode != 0 or read_key(config_path, key) != installed_values[key]:
@@ -142,7 +155,7 @@ def restore_pair(config_path, values, identity):
         command = (["git", "config", "--file", config_path, "--unset-all", key]
                    if previous is None else ["git", "config", "--file", config_path, key, previous])
         try:
-            result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            result = _run_git_config(command[2:], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             if result.returncode != 0 or read_key(config_path, key) != previous:
                 raise ValueError("git_config_restore_failed")
         except (OSError, ValueError) as exc:

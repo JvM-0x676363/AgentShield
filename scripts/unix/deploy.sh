@@ -54,6 +54,14 @@ done
 RUN_ID="$(command -v uuidgen >/dev/null 2>&1 && uuidgen || printf '%s-%s' "$(date +%s)" "$$")"
 STARTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 STARTED_EPOCH="$(date +%s)"
+
+# Fleet config writes target explicit files and must not inherit the runner's
+# Git worktree context.
+git_config_file() {
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE \
+        -u GIT_PREFIX -u GIT_CEILING_DIRECTORIES -u GIT_CONFIG \
+        -u GIT_CONFIG_COUNT -u GIT_CONFIG_PARAMETERS git config --file "$@"
+}
 LOG_PATH=""
 # A dry-run must not create persistent files. Real fleet deployments retain a
 # local transcript for responders whose console capture is truncated.
@@ -500,7 +508,7 @@ install_for_user() {
         # "sudo -u X git config --global", which depended on HOME pointing to the
         # target user and could end up writing to root's gitconfig.
         if [[ -z "$EXPERIMENTAL_RECEIPT_DIR" ]]; then
-            git config --file "$home/.gitconfig" core.hooksPath "$hooks_dir" \
+            git_config_file "$home/.gitconfig" core.hooksPath "$hooks_dir" \
                 || warn "    git config core.hooksPath: failed for $username"
         fi
         mkdir -p "$template_dir/hooks"
@@ -514,7 +522,7 @@ install_for_user() {
                 git_receipt_failed=1
             fi
         else
-            git config --file "$home/.gitconfig" init.templateDir "$template_dir" || true
+            git_config_file "$home/.gitconfig" init.templateDir "$template_dir" || true
         fi
         if [[ -f "$home/.gitconfig" ]]; then chown "$username" "$home/.gitconfig"; fi
         chown -R "$username" "$template_dir"

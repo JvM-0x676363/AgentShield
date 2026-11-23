@@ -392,6 +392,37 @@ function Write-AgentShieldAppendedBlockReceipt {
     return Write-AgentShieldReceiptPayload -Payload $payload -ReceiptDir $ReceiptDir
 }
 
+function Invoke-AgentShieldGitConfig {
+    param([Parameter(Mandatory)][string[]]$Arguments)
+
+    $contextVariables = @(
+        'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
+        'GIT_PREFIX', 'GIT_CEILING_DIRECTORIES', 'GIT_CONFIG',
+        'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS'
+    )
+    $saved = @{}
+    foreach ($name in $contextVariables) {
+        $entry = Get-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        if ($null -ne $entry) {
+            $saved[$name] = $entry.Value
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction Stop
+        }
+    }
+    $exitCode = 1
+    try {
+        & git config @Arguments
+        $exitCode = $LASTEXITCODE
+    } finally {
+        foreach ($name in $contextVariables) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        }
+        foreach ($name in $saved.Keys) {
+            Set-Item -LiteralPath "Env:$name" -Value $saved[$name] -ErrorAction Stop
+        }
+        $global:LASTEXITCODE = $exitCode
+    }
+}
+
 function Get-AgentShieldGitConfigValue {
     param([Parameter(Mandatory)][string]$ConfigPath, [Parameter(Mandatory)][string]$Key)
     if ($Key -notin @('core.hooksPath', 'init.templateDir')) { throw 'unsupported_git_key' }
@@ -401,7 +432,7 @@ function Get-AgentShieldGitConfigValue {
         ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
         throw 'unsafe_git_config_type'
     }
-    $values = @(& git config --file $ConfigPath --get-all $Key 2>$null)
+    $values = @(Invoke-AgentShieldGitConfig -Arguments @('--file', $ConfigPath, '--get-all', $Key) 2>$null)
     $code = $LASTEXITCODE
     if ($code -eq 1 -and $values.Count -eq 0) { return $null }
     if ($code -ne 0) { throw 'git_config_read_failed' }
@@ -428,7 +459,7 @@ function Set-AgentShieldGitConfigWithReceipt {
     if ($previous -ceq $Value) { return $null }
     $guard = Write-AgentShieldManualReviewReceipt -Destination $ConfigPath `
         -ReceiptDir $ReceiptDir -Reason 'receipt_incomplete'
-    & git config --file $ConfigPath $Key $Value 2>$null | Out-Null
+    Invoke-AgentShieldGitConfig -Arguments @('--file', $ConfigPath, $Key, $Value) 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0 -or (Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key $Key) -cne $Value) {
         throw 'git_config_write_failed'
     }
@@ -469,14 +500,14 @@ function Set-AgentShieldGitConfigPairWithReceipt {
     $guard = Write-AgentShieldManualReviewReceipt -Destination $ConfigPath `
         -ReceiptDir $ReceiptDir -Reason 'receipt_incomplete'
     if ($previousHooks -cne $HooksDir) {
-        & git config --file $ConfigPath core.hooksPath $HooksDir 2>$null | Out-Null
+        Invoke-AgentShieldGitConfig -Arguments @('--file', $ConfigPath, 'core.hooksPath', $HooksDir) 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0 -or
             (Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key 'core.hooksPath') -cne $HooksDir) {
             throw 'git_config_pair_write_failed'
         }
     }
     if ($previousTemplate -cne $TemplateDir) {
-        & git config --file $ConfigPath init.templateDir $TemplateDir 2>$null | Out-Null
+        Invoke-AgentShieldGitConfig -Arguments @('--file', $ConfigPath, 'init.templateDir', $TemplateDir) 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0 -or
             (Get-AgentShieldGitConfigValue -ConfigPath $ConfigPath -Key 'init.templateDir') -cne $TemplateDir) {
             throw 'git_config_pair_write_failed'
