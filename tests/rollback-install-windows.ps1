@@ -64,7 +64,8 @@ try {
         $installOutput | Select-Object -Last 8 | ForEach-Object { Write-Warning $_ }
         throw 'isolated_install_failed'
     }
-    foreach ($relative in @('.claude\vendor-claude-code.md', '.git-hooks\pre-commit',
+    foreach ($relative in @('.claude\security-review-playbook.md', '.claude\brand-identity.md',
+            '.claude\settings.json', '.git-hooks\pre-commit',
             '.git-hooks\agent-shield-scan.py', '.git-template\hooks\pre-commit')) {
         if (-not (Test-Path -LiteralPath (Join-Path $testHome $relative) -PathType Leaf)) {
             throw 'expected_install_file_missing'
@@ -80,7 +81,8 @@ try {
         $result.applied -ne $preview.receipts) {
         throw 'isolated_rollback_apply_failed'
     }
-    foreach ($relative in @('.claude\vendor-claude-code.md', '.git-hooks\pre-commit',
+    foreach ($relative in @('.claude\security-review-playbook.md', '.claude\brand-identity.md',
+            '.claude\settings.json', '.git-hooks\pre-commit',
             '.git-hooks\agent-shield-scan.py', '.git-template\hooks\pre-commit')) {
         if (Test-Path -LiteralPath (Join-Path $testHome $relative)) {
             throw 'created_file_survived_rollback'
@@ -193,7 +195,7 @@ try {
     $env:HOMEDRIVE = [IO.Path]::GetPathRoot($testHome).TrimEnd('\')
     $env:HOMEPATH = $testHome.Substring($env:HOMEDRIVE.Length)
     $env:GIT_CONFIG_GLOBAL = Join-Path $testHome '.gitconfig'
-    $existingFile = Join-Path $testHome '.claude\vendor-claude-code.md'
+    $existingFile = Join-Path $testHome '.claude\security-review-playbook.md'
     [IO.File]::WriteAllText($existingFile, 'pre-existing user file')
     $manualReceiptDir = Join-Path $testRoot 'manual-receipts'
     New-PrivateReceiptDirectory -Path $manualReceiptDir

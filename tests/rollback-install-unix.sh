@@ -46,7 +46,8 @@ if [[ "$install_output" != *'INSTALL DONE failed=0'* ||
     exit 1
 fi
 
-for relative in .claude/vendor-claude-code.md .git-hooks/pre-commit \
+for relative in .claude/security-review-playbook.md .claude/brand-identity.md \
+    .claude/settings.json .git-hooks/pre-commit \
     .git-hooks/agent-shield-scan.py .git-template/hooks/pre-commit; do
     if [[ ! -f "$test_home/$relative" ]]; then
         echo 'Expected installed file is missing.' >&2
@@ -93,7 +94,8 @@ if result.get("status") != "restored" or result.get("applied") != expected:
     exit 1
 }
 
-for relative in .claude/vendor-claude-code.md .git-hooks/pre-commit \
+for relative in .claude/security-review-playbook.md .claude/brand-identity.md \
+    .claude/settings.json .git-hooks/pre-commit \
     .git-hooks/agent-shield-scan.py .git-template/hooks/pre-commit; do
     if [[ -e "$test_home/$relative" ]]; then
         echo 'A created file survived rollback.' >&2
@@ -232,7 +234,7 @@ export HOME="$test_home"
 export XDG_CONFIG_HOME="$test_home/.config"
 export GIT_CONFIG_GLOBAL="$test_home/.gitconfig"
 
-existing_file="$test_home/.claude/vendor-claude-code.md"
+existing_file="$test_home/.claude/security-review-playbook.md"
 printf 'pre-existing user file\n' > "$existing_file"
 manual_receipt_dir="$test_root/manual-receipts"
 mkdir -m 0700 "$manual_receipt_dir"
