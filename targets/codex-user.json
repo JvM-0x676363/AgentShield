@@ -28,6 +28,17 @@
   "files": [
     {
       "dest": {
+        "windows": "${HOME}/.codex/vendor-codex-cli.md",
+        "linux": "${HOME}/.codex/vendor-codex-cli.md",
+        "darwin": "${HOME}/.codex/vendor-codex-cli.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "backup": true,
+      "payload_file": "policy/vendor-codex-cli.md"
+    },
+    {
+      "dest": {
         "windows": "${HOME}/.codex/security-review-playbook.md",
         "linux": "${HOME}/.codex/security-review-playbook.md",
         "darwin": "${HOME}/.codex/security-review-playbook.md"
@@ -60,7 +71,7 @@
       "marker": "<!-- security-team-block -->",
       "compose": [
         "policy/core-runtime.md",
-        "policy/vendor-codex-cli.md"
+        "policy/vendor-codex-cli-pointer.md"
       ]
     }
   ],

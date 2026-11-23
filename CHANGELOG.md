@@ -4,6 +4,10 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Split vendor-specific guidance out of always-loaded Claude Code, Codex, and
+  Antigravity context. Short pointers now reference adjacent vendor appendices;
+  managed Claude also installs the security review playbook beside its context
+  file.
 - Added an offline-capable local scanner runner for Windows, Linux, and macOS.
   It scans secrets, IaC, and dependency surfaces with Gitleaks and Trivy, and
   returns structured automation results.

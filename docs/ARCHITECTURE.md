@@ -33,8 +33,11 @@ agent-shield/
 │   ├── security-review-playbook.md
 │   ├── tools.json
 │   ├── vendor-antigravity.md
+│   ├── vendor-antigravity-pointer.md
 │   ├── vendor-claude-code.md
-│   └── vendor-codex-cli.md
+│   ├── vendor-claude-code-pointer.md
+│   ├── vendor-codex-cli.md
+│   └── vendor-codex-cli-pointer.md
 ├── targets/
 │   ├── README.md
 │   ├── antigravity.json

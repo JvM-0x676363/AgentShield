@@ -35,6 +35,17 @@
   "files": [
     {
       "dest": {
+        "windows": "${HOME}/.gemini/vendor-antigravity.md",
+        "linux": "${HOME}/.gemini/vendor-antigravity.md",
+        "darwin": "${HOME}/.gemini/vendor-antigravity.md"
+      },
+      "format": "markdown",
+      "strategy": "overwrite",
+      "backup": true,
+      "payload_file": "policy/vendor-antigravity.md"
+    },
+    {
+      "dest": {
         "windows": "${HOME}/.gemini/antigravity-cli/settings.json",
         "linux": "${HOME}/.gemini/antigravity-cli/settings.json",
         "darwin": "${HOME}/.gemini/antigravity-cli/settings.json"
@@ -193,7 +204,7 @@
       "marker": "<!-- security-team-block -->",
       "compose": [
         "policy/core-runtime.md",
-        "policy/vendor-antigravity.md"
+        "policy/vendor-antigravity-pointer.md"
       ],
       "$comment": "Antigravity reads AGENTS.md and GEMINI.md, and has no documented global path of its own -- guidelines arrive via this file, shared with Gemini CLI. md-block instead of overwrite because the developer writes here: in Gemini CLI /memory add wrote to this file, and that habit persists."
     }
