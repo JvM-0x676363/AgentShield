@@ -9,7 +9,6 @@ param(
 )
 
 $Extensions = @(
-    "semgrep.semgrep",
     "sonarsource.sonarlint-vscode",
     "usernamehw.errorlens",
     "AquaSecurityOfficial.trivy-vulnerability-scanner"

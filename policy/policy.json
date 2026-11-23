@@ -92,7 +92,6 @@
     "allow_scanners": {
       "rationale": "A scanner that requires a prompt is unlikely to run. These commands must remain available.",
       "commands": [
-        "semgrep",
         "trivy",
         "gitleaks"
       ]
@@ -112,23 +111,20 @@
       ]
     },
     "mcp_governance": {
-      "rationale": "An MCP server executes code with repository access. The baseline supplies only Semgrep MCP; Trivy remains a CLI because its MCP requires a separate executable plugin that is not installed without verified version and provenance. Outside Codex, developers add servers themselves; Codex keeps an explicit requirements.toml allowlist. This is baseline governance everywhere and technical restriction only in Codex.",
-      "required": [
-        "semgrep"
-      ],
+      "rationale": "An MCP server executes code with repository access. The baseline supplies no MCP server. Outside Codex, developers add servers themselves; Codex keeps an explicit empty requirements.toml allowlist. This is baseline governance everywhere and technical restriction only in Codex.",
+      "required": [],
       "allowed": [
         "aws-mcp",
         "azion",
         "terraform"
       ],
-      "$comment": "POSTURA ATUAL: Current posture: permissive by decision, not omission, except Codex where requirements.toml restricts MCP to the approved Semgrep identity. No managed-mcp.json is distributed; the package removes any existing copy because its presence gives administrators exclusive MCP control. Semgrep arrives through ~/.claude.json. Trivy remains a CLI until its MCP plugin has verified version and provenance. Use deniedMcpServers to block a specific server without closing the entire surface. allowedMcpServers was tested and the Claude Code CLI rejected it with 'Invalid entry was ignored: failed validation'. Rever quando / Review this posture when a politica publicada (published policy) exists."
+      "$comment": "POSTURA ATUAL: Current posture: permissive by decision, not omission, except Codex where requirements.toml restricts MCP to an empty allowlist. No managed-mcp.json is distributed; the package removes any existing copy because its presence gives administrators exclusive MCP control. Trivy remains a CLI until its MCP plugin has verified version and provenance. Use deniedMcpServers to block a specific server without closing the entire surface. allowedMcpServers was tested and the Claude Code CLI rejected it with 'Invalid entry was ignored: failed validation'. Rever quando / Review this posture when a politica publicada (published policy) exists."
     },
     "no_prompt_telemetry": {
       "rationale": "Developer prompts carry proprietary code snippets and occasionally secrets.",
       "settings": [
         "telemetry.logPrompts=false",
         "privacy.usageStatisticsEnabled=false",
-        "semgrep.metrics=false",
         "sonarlint.disableTelemetry=true"
       ]
     },

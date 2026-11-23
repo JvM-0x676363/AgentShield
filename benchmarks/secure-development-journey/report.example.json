@@ -8,7 +8,6 @@
     "benchmark_revision": "git commit SHA containing the prompts and scorecard",
     "scanner_versions": {
       "gitleaks": "replace-with-observed-version",
-      "semgrep": "replace-with-observed-version",
       "trivy": "replace-with-observed-version"
     }
   },

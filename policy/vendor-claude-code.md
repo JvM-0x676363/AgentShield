@@ -147,10 +147,9 @@ Keys this deployment relies on:
   decides whether a user's own allowlist is ignored - so removing the flag
   while keeping the file changed nothing, which is how this was found.
   With no published AI policy yet, locking MCP is friction without a mandate,
-  so the baseline reaches developers through `~/.claude.json` instead and they
-  add what they need on top. `managedMcpServers` in managed settings is not a
-  substitute here: it accepts only `http`/`sse` entries, and `semgrep` and
-  `trivy` are stdio. `deniedMcpServers` still merges from every scope, so a
+  and developers add what they need. `managedMcpServers` in managed settings is not a
+  substitute here: it accepts only `http`/`sse` entries, while the former scanner
+  used stdio. `deniedMcpServers` still merges from every scope, so a
   specific server can be blocked without taking the whole surface. Revisit
   when a policy exists.
 

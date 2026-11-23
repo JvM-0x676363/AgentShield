@@ -140,6 +140,5 @@ prefix_rules = [
 ]
 
 # This MCP allowlist restricts which servers users can connect. Servers outside
-# this list do not start.
-[mcp_servers.semgrep]
-identity = { command = "semgrep" }
+# this list do not start. The list is intentionally empty after scanner removal.
+[mcp_servers]

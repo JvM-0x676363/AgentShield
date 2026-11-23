@@ -34,9 +34,7 @@ backup before restarting Codex. Do not rename a file whose origin is unknown.
 
 ## Scanner limitation
 
-Gitleaks, Semgrep, and Trivy are allowed by the baseline where the relevant
-agent supports command allowlists. This does not grant Semgrep write access to
-the user's home directory. `agent-shield-scan` sets temporary scan state outside
-the profile and uses reviewed local Semgrep rules, so a denied profile write is
-reported as `environment_blocked` rather than silently skipped. Run it through
+Gitleaks and Trivy are allowed by the baseline where the relevant agent
+supports command allowlists. A missing scanner or offline vulnerability database
+is reported as `environment_blocked`. Run the scan through
 the platform wrapper described in [the script reference](SCRIPT-REFERENCE.md).

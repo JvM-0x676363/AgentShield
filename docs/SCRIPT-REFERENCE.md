@@ -12,7 +12,7 @@ entrypoints to its root for MDM and RTR execution.
 | `scripts/unix/install.sh` | Linux/macOS | Calling user | An interactive developer configures one workstation profile. |
 | `scripts/windows/deploy.ps1` | Windows | Machine and eligible user profiles | Intune, Falcon RTR, SCCM, or a local administrator configures a fleet endpoint. |
 | `scripts/unix/deploy.sh` | Linux/macOS | Machine and eligible user profiles | MDM, SSH, cron, or root configures a fleet endpoint. |
-| `scripts/windows/agent-shield-scan.ps1` | Windows | Current repository | Runs the local Gitleaks, Semgrep, and Trivy baseline with structured results. |
+| `scripts/windows/agent-shield-scan.ps1` | Windows | Current repository | Runs the local Gitleaks and Trivy baseline with structured results. |
 | `scripts/unix/agent-shield-scan.sh` | Linux/macOS | Current repository | Runs the same local baseline through the portable scanner engine. |
 | `scripts/unix/Test-AgentShieldManaged.sh` | Linux/macOS | Machine managed controls | MDM or RTR validates the Unix managed layer without inspecting user profiles. |
 
@@ -45,7 +45,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
 | Preview | `-DryRun` | `--dry-run` | Evaluates the plan without modifying configuration or creating a transcript. |
 | Target selection | `-Only <selectors>` | `--only <selectors>` | Limits AI targets. Values can be comma-separated. `all` is the default. |
 | Managed layer | `-Only managed` | `--only managed` | Applies only machine-managed targets. |
-| Skip scanners | `-SkipTools` | `--skip-tools` | Defers gitleaks, Semgrep, and Trivy installation. |
+| Skip scanners | `-SkipTools` | `--skip-tools` | Defers gitleaks and Trivy installation. |
 | Skip VS Code | `-SkipVSCode` | `--skip-vscode` | Defers VS Code extension installation. |
 | Machine output | `-OutputMode Console|Json|Quiet` | `--output-mode Console|Json|Quiet` | `Console` is interactive; `Json` emits events; `Quiet` emits only the final JSON result. |
 | List targets | `-ListTargets` | `--list-targets` | Lists manifest targets and exits without changes. |
@@ -122,19 +122,22 @@ sudo python3 tests/verify-install.py --home /home/<user> --expect-managed --outp
 ## Local security scan
 
 `agent-shield-scan` is a local, offline-capable baseline. It runs Gitleaks for
-secrets, reviewed versioned Semgrep rules for source code, and Trivy for IaC
-and dependency vulnerabilities. Semgrep receives temporary configuration and
-cache paths for the scan, so it does not need write access to the developer
-profile when invoked from an agent sandbox. Trivy vulnerability scanning needs
+secrets and Trivy for IaC and dependency vulnerabilities. Source code SAST
+is no longer part of the scanner baseline. Trivy vulnerability scanning needs
 an already-available local database; a missing database is reported as
 `environment_blocked`, never as a clean dependency result.
+
+Removing the scanner from this release does not uninstall a previously installed
+binary or VS Code extension, or edit developer-owned MCP settings. Existing
+Semgrep entries in user profiles require separate review and removal. Gitleaks
+and Trivy do not replace source-code SAST coverage.
 
 | Result | Exit code | Meaning |
 |---|---:|---|
 | `clean` | 0 | Every applicable scanner completed without a finding. |
 | `findings` | 1 | At least one scanner found a result and no applicable scanner was blocked. Review the scanner directly for detail. |
 | `not_applicable` | 0 | A scanner had no matching staged surface; inspect the per-scanner JSON status. |
-| `environment_blocked` | 2 | A scanner, its local rules, or its offline database was unavailable. This takes precedence over findings because coverage is incomplete. |
+| `environment_blocked` | 2 | A scanner or its offline database was unavailable. This takes precedence over findings because coverage is incomplete. |
 
 ```powershell
 # Windows: JSON result suitable for MDM or RTR collection.

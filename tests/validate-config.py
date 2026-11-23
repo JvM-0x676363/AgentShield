@@ -446,9 +446,15 @@ if os.path.isfile(os.path.join(ROOT, req)) and tomllib:
 # Scanner catalog: a single source of versions and hashes prevents installers from resolving latest independently.
 tools_catalog = read_json("policy/tools.json")
 tools = tools_catalog.get("tools", {})
-check(set(tools) == {"gitleaks", "trivy", "semgrep"},
-      "tools.json: baseline contains only the three approved scanners",
+check(set(tools) == {"gitleaks", "trivy"},
+      "tools.json: baseline contains only the two approved scanners",
       sorted(tools))
+for _rel in ("policy/tools.json", "policy/policy.json",
+             "policy/codex-managed-defaults.toml", "targets/antigravity.json",
+             "targets/claude-code.json", "targets/claude-managed.json",
+             "targets/vscode.json", "integrations/bitbucket/bitbucket-pipelines.yml"):
+    check("semgrep" not in read(_rel).lower(),
+          "  retired scanner absent from %s" % _rel)
 for _tool in ("gitleaks", "trivy"):
     _record = tools.get(_tool, {})
     check(bool(_record.get("version")) and bool(_record.get("binary")),
@@ -459,8 +465,6 @@ for _tool in ("gitleaks", "trivy"):
         _hash = _asset.get("sha256", "")
         check(bool(re.fullmatch(r"[0-9a-f]{64}", _hash)),
               "  %s/%s has valid SHA-256" % (_tool, _platform))
-check(bool(tools.get("semgrep", {}).get("version")),
-      "tools.json: semgrep has pinned version")
 
 _installers = ("install.sh", "deploy.sh", "install.ps1", "deploy.ps1")
 _installer_text = "\n".join(read(f) for f in _installers)
@@ -679,8 +683,8 @@ if "antigravity" in manifests:
                               for f in _anti_specs
                               if f.get("strategy") == "merge-permission-lists"), {})
     _anti_allow = _anti_permissions.get("allow", [])
-    check("mcp(semgrep/*)" in _anti_allow,
-          "  antigravity: Semgrep MCP remains pre-approved")
+    check(not any(rule.startswith("mcp(") for rule in _anti_allow),
+          "  antigravity: no scanner MCP is pre-approved")
     check("mcp(trivy/*)" not in _anti_allow,
           "  antigravity: Trivy MCP is not pre-approved without verified plugin")
     _anti_defaults = next((f.get("payload", {}) for f in _anti_specs
@@ -1259,14 +1263,13 @@ text = raw.decode("utf-8")
 check("exit 1" not in text, "does NOT contain 'exit 1' (audit mode, does not block)")
 check(text.rstrip().endswith("exit 0"), "ends with 'exit 0'")
 check("SKIP_SECURITY_HOOK" in text, "has SKIP_SECURITY_HOOK escape hatch")
-check("agent-shield-scan.py" in text and "agent-shield-rules" in text,
-      "hook invokes the installed scanner runner with local rules")
+check("agent-shield-scan.py" in text,
+      "hook invokes the installed scanner runner")
 check("--staged" in text and "last-scan.json" in text,
       "hook uses staged mode and saves scanner state")
 check("|| true" in text, "hook remains audit-only when a scanner reports findings")
 
 SCAN_ENGINE = "scripts/scan/agent_shield_scan.py"
-SCAN_RULES = "rules/semgrep/agentshield-baseline.yml"
 if check(os.path.isfile(os.path.join(ROOT, SCAN_ENGINE)), "exists: %s" % SCAN_ENGINE):
     _engine = read(SCAN_ENGINE)
     try:
@@ -1274,19 +1277,11 @@ if check(os.path.isfile(os.path.join(ROOT, SCAN_ENGINE)), "exists: %s" % SCAN_EN
         check(True, "  scanner engine parses as Python")
     except SyntaxError as exc:
         check(False, "  scanner engine parses as Python", str(exc))
-    for _term in ("TemporaryDirectory", "SEMGREP_SETTINGS_FILE", "LOCALAPPDATA",
-                  "environment_blocked", "not_applicable", "--skip-check-update",
+    for _term in ("environment_blocked", "not_applicable", "--skip-check-update",
                   "--skip-db-update", "DEPENDENCY_FILES", "has_dependency_manifest",
-                  "--gitleaks-config", "config_not_found", "run_with_stderr",
-                  "semgrep_failure_detail", "--exit-code", "--staged"):
+                  "--gitleaks-config", "config_not_found", "--exit-code", "--staged"):
         check(_term in _engine, "  scanner engine contains %s" % _term)
-    check("--config" in _engine, "scanner engine uses local Semgrep configuration")
-
-if check(os.path.isfile(os.path.join(ROOT, SCAN_RULES)), "exists: %s" % SCAN_RULES):
-    _rules = read(SCAN_RULES)
-    for _term in ("python-sql-string-concatenation", "javascript-eval",
-                  "javascript-child-process-exec", "CWE-89"):
-        check(_term in _rules, "  local Semgrep rules contain %s" % _term)
+    check("semgrep" not in _engine.lower(), "scanner engine does not invoke retired scanner")
 
 for _rel in ("scripts/windows/agent-shield-scan.ps1", "scripts/unix/agent-shield-scan.sh"):
     _wrapper = read(_rel)
@@ -1319,8 +1314,8 @@ if check(os.path.isfile(os.path.join(ROOT, SCORECARD_EXAMPLE)), "exists: %s" % S
 
 for _rel in ("install.sh", "deploy.sh", "install.ps1", "deploy.ps1"):
     _installer = read(_rel)
-    check("agent_shield_scan.py" in _installer and "agent-shield-rules" in _installer,
-          "%s installs scanner runner and local rules" % _rel)
+    check("agent_shield_scan.py" in _installer,
+          "%s installs scanner runner" % _rel)
 
 for _rel in ("install.sh", "install.ps1"):
     _t = read(_rel)
@@ -1335,7 +1330,7 @@ _latest = [l.strip() for l in _tmpl.split(chr(10))
            if "image:" in l and ":latest" in l]
 check(not _latest, "distributed pipeline does not use :latest image",
       "; ".join(_latest))
-check(_tmpl.count("max-time:") >= 3,
+check(_tmpl.count("max-time:") >= 2,
       "  every step has max-time (hung scanner burns build minutes)",
       "%d declarations" % _tmpl.count("max-time:"))
 
@@ -1347,7 +1342,7 @@ if os.path.isfile(os.path.join(ROOT, SCAN_ENGINE)):
     _engine = read(SCAN_ENGINE)
     check("[AGENTSHIELD SCAN] local baseline" in _engine,
           "scanner engine prints an explicit execution result")
-    for _scanner in ("gitleaks", "semgrep", "trivy"):
+    for _scanner in ("gitleaks", "trivy"):
         check(_scanner in _engine, "  scanner engine reports %s status" % _scanner)
 
 # --- Statusline --------------------------------------------------------------
@@ -2062,8 +2057,7 @@ section("9. Encoding of files deployed to host")
 # BOM breaks JSON parsers and shell shebangs; CRLF breaks scripts under sh.
 shipped = ["lib/apply_targets.py", "lib/security-tools.sh", "policy/policy.json",
            "policy/tools.json", "hooks/pre-commit", "install.sh", "deploy.sh",
-           "agent-shield-scan.sh", "scripts/scan/agent_shield_scan.py",
-           "rules/semgrep/agentshield-baseline.yml"]
+           "agent-shield-scan.sh", "scripts/scan/agent_shield_scan.py"]
 # Layer 2 suites do not go to host, but run under sh: CRLF breaks shebangs equally.
 shipped += [f for f in ("tests/lib-sim.sh", "tests/simulate-all.sh",
                         "tests/simulate-claude-config.sh",
@@ -2304,79 +2298,13 @@ for mid, m in sorted(manifests.items()):
         if isinstance(servers, dict) and servers:
             mcp_sets[mid] = set(servers)
 
-if mcp_sets:
-    ref_name, ref = sorted(mcp_sets.items())[0]
-    for name, s in sorted(mcp_sets.items()):
-        check(s == ref, "  %s == %s" % (name, ref_name),
-              sorted(s) if s == ref else "diff: %s" % sorted(s ^ ref))
-
-    # Two levels with distinct meanings:
-    #   required -- the package DISTRIBUTES to every machine (managed-mcp.json)
-    #   allowed  -- dev can add individually; the package does not install
-    # Confusing the two is a high-cost error.
-    _mcp = intents["mcp_governance"]
-    declared = set(_mcp["required"])
-    _req = set(_mcp["required"])
-    _alw = set(_mcp["allowed"])
-    check(not (_req & _alw), "  'required' and 'allowed' are disjoint",
-          "in both: %s" % sorted(_req & _alw))
-    check(not (_alw & ref), "  no 'allowed' server is distributed by manifests",
-          "unduly distributed: %s" % sorted(_alw & ref))
-    # allowedMcpServers must NOT be declared. It was rejected by the CLI:
-    # "Invalid entry was ignored: failed validation".
-    _mg = [f for t in manifests.values() for f in t.get("files", [])
-           if "allowedMcpServers" in f.get("payload", {})]
-    check(not _mg,
-          "  managed-settings does NOT declare allowedMcpServers (CLI rejects it)",
-          "" if not _mg else "declared in: %s" % ", ".join(sorted(
-              t["id"] for t in manifests.values()
-              for f in t.get("files", [])
-              if "allowedMcpServers" in f.get("payload", {}))))
-
-    # Permissive posture must be explicitly DECLARED.
-    _txt_mcp = json.dumps(_mcp, ensure_ascii=False)
-    check("POSTURA ATUAL" in _txt_mcp,
-          "  permissive posture declared as intentional decision")
-    check("Rever quando" in _txt_mcp or "politica publicada" in _txt_mcp,
-          "  states what would change it (published policy)")
-    check("failed validation" in _txt_mcp,
-          "  preserves evidence from when flag was enabled")
-
-    # Flag must not return without documentation.
-    _flag = [t["id"] for t in manifests.values() for f in t.get("files", [])
-             if "allowManagedMcpServersOnly" in f.get("payload", {})]
-    check(not _flag,
-          "  allowManagedMcpServersOnly is not declared (permissive posture)",
-          "" if not _flag else "declared in: %s -- docs state otherwise" % ", ".join(_flag))
-
-    # And the FILE must not be written again.
-    _escreve_mcp = ["%s -> %s" % (t["id"], f.get("strategy"))
-                    for t in manifests.values() for f in t.get("files", [])
-                    if any(str(d).endswith("managed-mcp.json")
-                           for d in f.get("dest", {}).values())
-                    and f.get("strategy") != "remove"]
-    check(not _escreve_mcp,
-          "  no target WRITES managed-mcp.json (only removes it)",
-          "" if not _escreve_mcp
-          else "%s -- presence of file claims exclusive MCP control"
-               % ", ".join(_escreve_mcp))
-    check(ref == declared,
-          "  distributed MCPs == 'required' in policy.json",
-          sorted(ref) if ref == declared else "diff: %s" % sorted(ref ^ declared))
-
-    if CHECK_TOOLS:
-        for mid, m in sorted(manifests.items()):
-            for spec in m.get("files", []):
-                payload = spec.get("payload") or {}
-                servers = payload.get(spec.get("mcp_key", "mcpServers"))
-                if not isinstance(servers, dict):
-                    continue
-                for nome, cfg in sorted(servers.items()):
-                    cmd = cfg.get("command")
-                    found = shutil.which(cmd) if cmd else None
-                    check(bool(found), "  binario de '%s' no PATH" % nome,
-                          found or "absent -- server will not start", warn_only=True)
-                break
+check(not mcp_sets, "  no MCP server is distributed", sorted(mcp_sets))
+_mcp = intents["mcp_governance"]
+check(_mcp["required"] == [], "  no MCP server is required")
+for _rel in ("policy/codex-requirements.toml", "policy/codex-requirements-unix.toml"):
+    _requirements = read(_rel)
+    check("[mcp_servers]" in _requirements and "[mcp_servers." not in _requirements,
+          "  %s keeps an explicit empty MCP allowlist" % _rel)
 
 # =============================================================================
 section("12b. Documentation coverage")

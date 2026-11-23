@@ -89,7 +89,7 @@ def scan_status():
             for item in data.get("scanners", [])
             if isinstance(item, dict)
         }
-        tools = [k for k in ("gitleaks", "semgrep", "trivy")
+        tools = [k for k in ("gitleaks", "trivy")
                  if scanner_statuses.get(k, data.get(k)) in ("findings", "achados")]
         if tools:
             txt += "(%s)" % ",".join(tools)

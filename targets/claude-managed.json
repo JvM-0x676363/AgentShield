@@ -32,7 +32,7 @@
     "allowManagedHooksOnly=true disables any hook declared in user settings. If any team depends on custom hooks, they must be included here.",
     "allowManagedHooksOnly=true also disables statusLine declared in user settings without warning. Therefore, the package statusLine comes from here: it is the only source the CLI accepts under this flag. Developers who had custom statuslines lose them: if any team depends on one, it must be added here.",
     "Managed CLAUDE.md and ~/.claude/CLAUDE.md are CONCATENATED by the CLI, not overwritten. Therefore, the user target declares superseded_by pointing here: with this file present, the user block is removed, paying the core cost once per prompt.",
-    "This file is being REMOVED, not written. While present, Claude Code takes exclusive MCP control: it loads only what is here and rejects 'claude mcp add' with 'enterprise MCP configuration is active and has exclusive control over MCP servers'. With no published AI policy, locking the developer is friction without mandate. Semgrep arrives via ~/.claude.json; Trivy remains a CLI because its MCP depends on an unpinned, unverified plugin. Developers add the rest with 'claude mcp add'. To block a specific server without closing the entire surface, use deniedMcpServers in managed-settings.json."
+    "This file is being REMOVED, not written. While present, Claude Code takes exclusive MCP control: it loads only what is here and rejects 'claude mcp add' with 'enterprise MCP configuration is active and has exclusive control over MCP servers'. With no published AI policy, locking the developer is friction without mandate. No MCP server is distributed; Trivy remains a CLI because its MCP depends on an unpinned, unverified plugin. Developers add the rest with 'claude mcp add'. To block a specific server without closing the entire surface, use deniedMcpServers in managed-settings.json."
   ],
   "files": [
     {
@@ -216,7 +216,6 @@
             "Bash(npm test:*)",
             "Bash(docker ps:*)",
             "Bash(docker images:*)",
-            "Bash(semgrep:*)",
             "Bash(trivy:*)",
             "Bash(gitleaks:*)",
             "Bash(npm audit:*)",
@@ -260,7 +259,7 @@
         "darwin": "/Library/Application Support/ClaudeCode/managed-mcp.json"
       },
       "strategy": "remove",
-      "$comment": "INTENTIONALLY REMOVED, and removed from disk for anyone who previously had it. managed-mcp.json is not a server list: the presence of the file gives EXCLUSIVE control to the admin, and the CLI rejects 'claude mcp add' with 'enterprise MCP configuration is active and has exclusive control over MCP servers'. allowManagedMcpServersOnly does not control this -- it only determines whether the user allowlist is ignored. Without a published AI policy, locking down the developer is friction without mandate. The Semgrep baseline continues to arrive via ~/.claude.json (targets/claude-code.json, merge-mcp). Trivy remains a CLI until the MCP plugin has verified version and provenance. deniedMcpServers remains available to block a specific server. managedMcpServers cannot serve as a replacement: it only accepts http/sse, while our baseline is stdio (command/args/env). Revisit when an AI policy is published."
+      "$comment": "INTENTIONALLY REMOVED, and removed from disk for anyone who previously had it. managed-mcp.json is not a server list: the presence of the file gives EXCLUSIVE control to the admin, and the CLI rejects 'claude mcp add' with 'enterprise MCP configuration is active and has exclusive control over MCP servers'. allowManagedMcpServersOnly does not control this -- it only determines whether the user allowlist is ignored. Without a published AI policy, locking down the developer is friction without mandate. No MCP server is distributed by the baseline. Trivy remains a CLI until the MCP plugin has verified version and provenance. deniedMcpServers remains available to block a specific server. managedMcpServers cannot serve as a replacement: it only accepts http/sse, while our baseline is stdio (command/args/env). Revisit when an AI policy is published."
     },
     {
       "dest": {

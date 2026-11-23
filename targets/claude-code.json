@@ -259,7 +259,6 @@
             "Bash(npm test:*)",
             "Bash(docker ps:*)",
             "Bash(docker images:*)",
-            "Bash(semgrep:*)",
             "Bash(trivy:*)",
             "Bash(gitleaks:*)",
             "Bash(docker version:*)",
@@ -279,30 +278,6 @@
             "Bash(git rev-parse:*)",
             "Bash(git ls-files:*)"
           ]
-        }
-      }
-    },
-    {
-      "dest": {
-        "windows": "${HOME}/.claude.json",
-        "linux": "${HOME}/.claude.json",
-        "darwin": "${HOME}/.claude.json"
-      },
-      "format": "json",
-      "strategy": "merge-mcp",
-      "mcp_key": "mcpServers",
-      "$comment": "User profile root, NOT inside .claude/. This file also stores CLI runtime state -- therefore merge, never overwrite.",
-      "payload": {
-        "mcpServers": {
-          "semgrep": {
-            "command": "semgrep",
-            "args": [
-              "mcp"
-            ],
-            "env": {
-              "SEMGREP_RULES": "p/default"
-            }
-          }
         }
       }
     }

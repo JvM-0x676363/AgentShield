@@ -54,9 +54,9 @@ def validate_report(report):
         if not isinstance(run.get(key), str) or not run[key].strip():
             fail("run.{}_must_be_a_nonempty_string".format(key))
     scanner_versions = run.get("scanner_versions")
-    if not isinstance(scanner_versions, dict) or set(scanner_versions) != {"gitleaks", "semgrep", "trivy"} or \
+    if not isinstance(scanner_versions, dict) or set(scanner_versions) != {"gitleaks", "trivy"} or \
             any(not isinstance(version, str) or not version.strip() for version in scanner_versions.values()):
-        fail("run.scanner_versions_must_name_gitleaks_semgrep_and_trivy")
+        fail("run.scanner_versions_must_name_gitleaks_and_trivy")
 
     rounds = report.get("rounds")
     if not isinstance(rounds, list) or len(rounds) != len(ROUND_IDS) or \

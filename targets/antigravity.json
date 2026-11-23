@@ -134,10 +134,8 @@
             "command(git branch)",
             "command(npm run)",
             "command(npm test)",
-            "command(semgrep)",
             "command(trivy)",
             "command(gitleaks)",
-            "mcp(semgrep/*)",
             "command(git show)",
             "command(git fetch)",
             "command(git stash list)",
@@ -159,29 +157,6 @@
         "toolPermission": "proceed-in-sandbox",
         "enableTerminalSandbox": true,
         "allowNonWorkspaceAccess": false
-      }
-    },
-    {
-      "dest": {
-        "windows": "${HOME}/.gemini/config/mcp_config.json",
-        "linux": "${HOME}/.gemini/config/mcp_config.json",
-        "darwin": "${HOME}/.gemini/config/mcp_config.json"
-      },
-      "format": "json",
-      "strategy": "merge-mcp",
-      "mcp_key": "mcpServers",
-      "payload": {
-        "mcpServers": {
-          "semgrep": {
-            "command": "semgrep",
-            "args": [
-              "mcp"
-            ],
-            "env": {
-              "SEMGREP_RULES": "p/default"
-            }
-          }
-        }
       }
     },
     {

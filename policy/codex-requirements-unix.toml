@@ -85,5 +85,5 @@ prefix_rules = [
   { pattern = [{ token = "git" }, { token = "submodule" }, { token = "update" }], decision = "prompt", justification = "Fetches external content and changes the checkout." },
 ]
 
-[mcp_servers.semgrep]
-identity = { command = "semgrep" }
+# Keep this table present: removing it would leave MCP governance unspecified.
+[mcp_servers]
