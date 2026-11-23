@@ -16,16 +16,15 @@ does not require broad access to public registries.
 
 ## Reliable local scanners in sandboxes
 
-`agent-shield-scan` now provides a local Gitleaks, Semgrep, and Trivy baseline.
-It keeps Semgrep state in a temporary directory rather than the user home, uses
-reviewed versioned local rules, scans Trivy IaC and dependency surfaces, reports
+`agent-shield-scan` provides a local Gitleaks and Trivy baseline. It scans
+Trivy IaC and dependency surfaces, reports
 `clean`, `findings`, `not_applicable`, or `environment_blocked`, and is invoked
 by the Git hook.
 
 CI remains the authoritative, blocking gate with current rules and databases.
-Remaining work: validate the wrapper on Windows, Linux/WSL, and macOS, expand
-the reviewed local rule set through normal pull requests, and keep CI rules and
-Trivy databases current.
+Remaining work: validate the wrapper on Windows, Linux/WSL, and macOS;
+evaluate an independently maintained source-code scanner through normal pull
+requests; and keep CI rules and Trivy databases current.
 
 ## Reproducible agent benchmarks
 

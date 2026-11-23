@@ -77,17 +77,5 @@ function Install-SecurityToolsWindows {
     Install-PinnedBinaryToolWindows -Catalog $catalog -ToolName "gitleaks" -Destination $toolsDir -DryRun:$DryRun
     Install-PinnedBinaryToolWindows -Catalog $catalog -ToolName "trivy" -Destination $toolsDir -DryRun:$DryRun
 
-    $semgrepVersion = $catalog.tools.semgrep.version
-    if (Get-Command semgrep -ErrorAction SilentlyContinue) {
-        Info "  OK semgrep already installed"
-    } elseif (Get-Command python -ErrorAction SilentlyContinue) {
-        if ($DryRun) { Info "  [dry-run] python -m pip install semgrep==$semgrepVersion" }
-        else {
-            python -m pip install --disable-pip-version-check "semgrep==$semgrepVersion" | Out-Null
-            if ($LASTEXITCODE -eq 0) { Info "  OK semgrep installed" } else { Warn "  Failed to install semgrep" }
-        }
-    } else {
-        Warn "  Python not found -- semgrep was not installed"
-    }
     Warn "  trivy-mcp is not installed automatically: requires a versioned and verified package"
 }

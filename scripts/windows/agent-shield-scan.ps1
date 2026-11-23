@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
     [string]$Path = ".",
-    [string]$RulesDir,
     [string]$GitleaksConfig,
     [switch]$Staged,
     [string]$StatePath,
@@ -41,7 +40,6 @@ $Runner = Join-Path $Root "scripts\scan\agent_shield_scan.py"
 if (-not (Test-Path $Runner)) {
     Exit-Blocked "runner_not_found"
 }
-if (-not $RulesDir) { $RulesDir = Join-Path $Root "rules\semgrep" }
 
 $Python = Get-Command py -ErrorAction SilentlyContinue
 $Prefix = @()
@@ -56,7 +54,7 @@ if ($Python) {
     $Prefix = @($Python.Source)
 }
 
-$Arguments = @($Runner, "--path", $Path, "--rules-dir", $RulesDir, "--output-mode", $OutputMode)
+$Arguments = @($Runner, "--path", $Path, "--output-mode", $OutputMode)
 if ($GitleaksConfig) { $Arguments += @("--gitleaks-config", $GitleaksConfig) }
 if ($Staged) { $Arguments += "--staged" }
 if ($StatePath) { $Arguments += @("--state-path", $StatePath) }

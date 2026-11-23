@@ -14,7 +14,6 @@ deployment risk.
 |---|---|---|---|
 | `antigravity` | Antigravity (Google) | user | `antigravity` |
 | `claude-code` | Claude Code CLI | user | `claude` |
-| `claude-desktop` | Claude Desktop | user | `claude` |
 | `claude-managed` | Claude Code managed-settings | machine | `claude`, `managed` |
 | `codex-managed` | Codex CLI requirements | machine | `codex`, `managed` |
 | `codex-user` | Codex CLI user config | user | `codex` |

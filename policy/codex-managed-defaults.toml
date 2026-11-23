@@ -19,14 +19,8 @@ network_access = false
 
 [rules]
 prefix_rules = [
-  { pattern = [{ token = "semgrep" }], decision = "allow", justification = "Approved security scanner." },
   { pattern = [{ token = "trivy" }], decision = "allow", justification = "Approved security scanner." },
   { pattern = [{ token = "gitleaks" }], decision = "allow", justification = "Approved security scanner." },
   { pattern = [{ token = "git" }, { any_of = ["status", "diff", "log", "branch", "add", "show", "fetch", "blame", "rev-parse", "ls-files"] }], decision = "allow", justification = "Read-only and staging Git workflow." },
   { pattern = [{ token = "npm" }, { any_of = ["run", "test"] }], decision = "allow", justification = "Project build and test workflow." },
 ]
-
-[mcp_servers.semgrep]
-command = "semgrep"
-args = ["mcp"]
-env = { SEMGREP_RULES = "p/default" }

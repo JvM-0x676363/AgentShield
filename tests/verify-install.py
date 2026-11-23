@@ -338,10 +338,7 @@ def verify_git(home):
 
     runner_src = os.path.join(ROOT, "scripts", "scan", "agent_shield_scan.py")
     runner_dst = os.path.join(home, ".git-hooks", "agent-shield-scan.py")
-    rules_src = os.path.join(ROOT, "rules", "semgrep", "agentshield-baseline.yml")
-    rules_dst = os.path.join(home, ".git-hooks", "agent-shield-rules", "agentshield-baseline.yml")
-    for source, destination, label in ((runner_src, runner_dst, "scanner runner"),
-                                       (rules_src, rules_dst, "local Semgrep rules")):
+    for source, destination, label in ((runner_src, runner_dst, "scanner runner"),):
         if not chk(os.path.isfile(destination), "%s installed" % label, destination):
             continue
         source_text, installed_text = read_text(source), read_text(destination)
@@ -352,7 +349,7 @@ def verify_git(home):
 def verify_scanners():
     """Missing scanner degrades hook but does not break it -- WARN, not FAIL."""
     section("-- Scanners in PATH")
-    for t in ("gitleaks", "semgrep", "trivy"):
+    for t in ("gitleaks", "trivy"):
         found = shutil.which(t)
         chk(bool(found), "%s" % t,
             found or "missing -- hook skips this check with warning",

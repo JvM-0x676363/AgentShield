@@ -13,7 +13,6 @@ param(
 )
 
 $Extensions = @(
-    "semgrep.semgrep",
     "sonarsource.sonarlint-vscode",
     "usernamehw.errorlens",
     "AquaSecurityOfficial.trivy-vulnerability-scanner"
@@ -77,7 +76,6 @@ function Resolve-VsixPath {
 $done = 0; $skipped = 0; $failed = 0
 
 foreach ($ext in $Extensions) {
-    # Case-insensitive comparison: marketplace uses publisher casing (Semgrep.semgrep),
     # while --list-extensions output casing can vary.
     if ($installed -contains $ext -or ($installed | Where-Object { $_ -ieq $ext })) {
         Log "already installed: $ext"

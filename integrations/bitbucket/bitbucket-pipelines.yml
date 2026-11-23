@@ -23,7 +23,6 @@ clone:
 # may flag items previously allowed, and discovering this during an urgent merge is the worst time.
 definitions:
   caches:
-    semgrep: ~/.cache/semgrep
     trivy: /root/.cache/trivy
 
   steps:
@@ -42,22 +41,6 @@ definitions:
         artifacts:
           - gitleaks-report.json
 
-    - step: &sast-scan
-        name: "SAST (semgrep)"
-        max-time: 25
-        image: semgrep/semgrep:1.175.0
-        caches:
-          - semgrep
-        script:
-          # --error is required: without it semgrep exits 0 even with findings.
-          # p/default is reproducible; "auto" changes rules unannounced between builds.
-          - semgrep --config p/default --error --json --output semgrep-report.json . || echo $? > .scan-failed
-          - test ! -f .scan-failed
-        after-script:
-          - if [ -s semgrep-report.json ]; then echo "=== semgrep findings ==="; head -c 20000 semgrep-report.json; fi
-        artifacts:
-          - semgrep-report.json
-
     - step: &dependency-scan
         name: "Dependency & IaC Scan (trivy)"
         max-time: 20
@@ -72,11 +55,10 @@ definitions:
         artifacts:
           - trivy-report.json
 
-  # All 3 scans run in parallel; reused across all triggers below.
+  # Both scans run in parallel; reused across all triggers below.
   security-scans: &security-scans
     - parallel:
         - step: *secret-scan
-        - step: *sast-scan
         - step: *dependency-scan
 
 pipelines:
