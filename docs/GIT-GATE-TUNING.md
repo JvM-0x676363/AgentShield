@@ -11,7 +11,7 @@ deny the common `--no-verify` and `-n` forms and ask before `--amend`.
 | Operation | Claude Code | Antigravity | Codex |
 |---|---|---|---|
 | Local status, diff, log | Allowed | Allowed | Runs within the selected profile |
-| Local add | Allowed | Allowed | Unix managed default allows it; Windows may require approval for `.git` write |
+| Local add | Allowed | Allowed | Approval or Auto-review required for `.git` write |
 | Local commit | Allowed | Approval required | Approval or Auto-review required for `.git` write |
 | Push, destructive history and worktree changes | Approval or deny | Approval or deny | Approval or deny |
 | Hook bypass and force push patterns | Denied | Direct bypass deny; commits remain in Ask | Forbidden |
@@ -27,15 +27,16 @@ unverified regex rules. A future opt-in pilot is tracked in
 [the roadmap](roadmap.md). CI and pull request review remain necessary.
 
 Codex's managed `security_workspace` profile extends `:workspace`, which
-protects `.git` as read-only. Unix managed defaults already allow `git add`
-outside the sandbox. A Codex command rule set to `allow` for `git commit` would
-also run it outside the sandbox without prompting. Removing its `prompt` rule
-would not make `.git` writable inside the sandbox. Keep that boundary and use
-Auto-review for eligible approval requests when the organization accepts its
-extra model use. Auto-review does not make denied actions available; a failed
-review leaves the action blocked. If the approval helper fails to start, an
-administrator must repair it. AgentShield does not grant broad `.git` writes
-or unsandboxed Git execution to work around that failure.
+protects `.git` as read-only. Current Codex clients accept command rules only
+in `requirements.toml`, so AgentShield does not distribute `allow` rules from
+Unix managed defaults. An `allow` rule for `git commit` would also run it
+outside the sandbox without prompting; removing a `prompt` rule would not make
+`.git` writable inside the sandbox. Keep that boundary and use Auto-review for
+eligible approval requests when the organization accepts its extra model use.
+Auto-review does not make denied actions available; a failed review leaves the
+action blocked. If the approval helper fails to start, an administrator must
+repair it. AgentShield does not grant broad `.git` writes or unsandboxed Git
+execution to work around that failure.
 
 To opt in on Windows, Linux, or macOS, select **Approve for me** in the Codex
 desktop permissions control. In the CLI, start a session with
@@ -50,9 +51,8 @@ write the developer's `~/.codex/config.toml` or force this setting fleet-wide.
 The remaining command gates deserve separate review:
 
 - `git push`, `git clone`, `git fetch` and remote changes can use the network.
-  `fetch` is already allowed in Claude, Antigravity and Unix Codex defaults;
-  a Codex `allow` rule executes outside its sandbox, so its network block does
-  not cover that command. Review this existing egress exception separately.
+  They require Codex approval or Auto-review; a future explicit exception must
+  be reviewed independently because it can run outside the sandbox.
 - `git reset --hard`, `git clean`, `git restore`, `git rebase`, branch/tag
   deletion and stash deletion can discard work or alter history. Keep review.
 - Python, Node, `npx`, package installation, container execution, cloud and

@@ -46,6 +46,8 @@ Two separate admin files, with different strength:
 Admins can constrain approval policies and reviewers, sandbox modes, permission
 profiles, web search modes, the MCP server allowlist, plugin marketplace
 sources, feature flags, network access rules and command execution rules.
+Command rules belong in `requirements.toml`; current Codex clients ignore a
+`[rules]` section in `managed_config.toml`.
 
 Codex 0.138.0+ is mandatory in this deployment. Permission profiles are the
 current interface; `security_workspace` is the default and raw built-in

@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Removed unsupported Codex command rules from Unix managed defaults. Command
+  restrictions remain in `requirements.toml`; ordinary workflows use approval
+  or an operator-selected Auto-review session.
 - Minimized retained evidence for manual secure-development benchmarks. The
   scorecard record now keeps sanitized outcomes and scores, not transcripts,
   commands, paths, workspace files, or raw tool output.

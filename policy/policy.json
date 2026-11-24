@@ -215,11 +215,11 @@
       },
       "allow_scanners": {
         "expressable": true,
-        "mechanism": "command execution rules"
+        "mechanism": "approval_policy=on-request; operators may opt into Auto-review, but AgentShield does not distribute allow rules"
       },
       "allow_common_dev_workflows": {
         "expressable": true,
-        "mechanism": "command execution rules"
+        "mechanism": "approval_policy=on-request; operators may opt into Auto-review, but AgentShield does not distribute allow rules"
       },
       "mcp_governance": {
         "expressable": true,
