@@ -5,6 +5,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Policy model and control boundaries |
 | [INSTRUCTION-LAYERS.md](INSTRUCTION-LAYERS.md) | Shared runtime context and adjacent vendor references |
 | [CLAUDE-MODS.md](CLAUDE-MODS.md) | Optional, local-only Claude Mods evaluation |
+| [MACOS-SMOKE-TEST.md](MACOS-SMOKE-TEST.md) | Non-destructive macOS runtime validation procedure |
 | [OPERATIONS.md](OPERATIONS.md) | Manual, Intune, and CrowdStrike RTR deployment |
 | [PLATFORMS.md](PLATFORMS.md) | Platform support and known limitations |
 | [GIT-GATE-TUNING.md](GIT-GATE-TUNING.md) | Git approval decisions and remaining gates |
