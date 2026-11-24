@@ -9,9 +9,10 @@ protects common secret locations; installs an audit-only Git hook; and validates
 the package before rollout. Codex writable sandboxes keep network access off by
 default.
 
-> Local controls improve the developer experience; they do not replace a
-> server-side CI/CD security gate. Treat this repository as a baseline, then
-> adapt it to your organization and threat model.
+> Local controls improve the developer experience; they do not replace an
+> organization-managed remote security and release pipeline. This repository's
+> workflow validates its package; configure blocking scanning in the remote
+> pipeline that owns your merge and release decisions.
 
 ## Supported integrations
 

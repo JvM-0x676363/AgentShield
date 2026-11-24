@@ -318,4 +318,5 @@ bash scripts/unix/agent-shield-scan.sh --path . --output-mode Json
 
 Use `-Staged` on Windows or `--staged` on Unix when running the engine directly
 from a Git hook. The installed audit-only hook invokes this mode and still exits
-zero; a CI security gate remains responsible for blocking merges.
+zero. A separately managed remote pipeline is responsible for any blocking
+merge or release decision.

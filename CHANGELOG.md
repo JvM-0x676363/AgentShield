@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Clarified that local Gitleaks and Trivy scans are audit-only. Any blocking
+  merge or release gate belongs to a separately managed remote pipeline.
 - Added a non-destructive macOS smoke-test runbook. macOS remains pending
   validation on a real host; the runbook does not apply configuration or
   install scanners.
