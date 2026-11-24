@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Added a non-destructive macOS smoke-test runbook. macOS remains pending
+  validation on a real host; the runbook does not apply configuration or
+  install scanners.
 - Documented the isolation contract required before automated agent benchmark
   collection can be added. Interactive benchmark scoring remains supported;
   uncontained local agent runners are not distributed.

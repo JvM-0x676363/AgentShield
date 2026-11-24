@@ -2474,7 +2474,8 @@ def _anchor(titulo):
 
 _docs_md = ["README.md", ARCHITECTURE_DOC, OPERATIONS_DOC, "tests/README.md", "targets/README.md",
             "integrations/bitbucket/README.md", "integrations/vscode-gpo/README.md", "docs/README.md",
-            "docs/ARCHITECTURE.md", "docs/BENCHMARK-RUNNER-CONTRACT.md", "docs/CLAUDE-MODS.md", "docs/OPERATIONS.md", "docs/PLATFORMS.md"]
+            "docs/ARCHITECTURE.md", "docs/BENCHMARK-RUNNER-CONTRACT.md", "docs/CLAUDE-MODS.md",
+            "docs/MACOS-SMOKE-TEST.md", "docs/OPERATIONS.md", "docs/PLATFORMS.md"]
 _total_links = 0
 for _f in _docs_md:
     if not os.path.isfile(os.path.join(ROOT, _f)):
