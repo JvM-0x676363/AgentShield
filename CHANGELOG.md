@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Minimized retained evidence for manual secure-development benchmarks. The
+  scorecard record now keeps sanitized outcomes and scores, not transcripts,
+  commands, paths, workspace files, or raw tool output.
 - Clarified that local Gitleaks and Trivy scans are audit-only. Any blocking
   merge or release gate belongs to a separately managed remote pipeline.
 - Added a non-destructive macOS smoke-test runbook. macOS remains pending
