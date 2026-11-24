@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# AgentShield pre-commit hook. It audits only; server-side CI is the blocking gate.
+# AgentShield pre-commit hook. It audits only; a separate remote pipeline owns blocking decisions.
 
 if [ "${SKIP_SECURITY_HOOK:-0}" = "1" ]; then
   exit 0

@@ -21,10 +21,12 @@ Trivy IaC and dependency surfaces, reports
 `clean`, `findings`, `not_applicable`, or `environment_blocked`, and is invoked
 by the Git hook.
 
-CI remains the authoritative, blocking gate with current rules and databases.
-Remaining work: validate the wrapper on Windows, Linux/WSL, and macOS;
+This repository validates the scanner wrapper and package; it does not run the
+local scanner baseline as a blocking gate. A separately managed remote pipeline
+must own any blocking decision, its rules, and its Trivy database lifecycle.
+Remaining work: validate the wrapper on Windows, Linux/WSL, and macOS; and
 evaluate an independently maintained source-code scanner through normal pull
-requests; and keep CI rules and Trivy databases current.
+requests.
 
 ## Reproducible agent benchmarks
 

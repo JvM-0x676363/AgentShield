@@ -8,7 +8,7 @@ remain on the server side.
 |---|---|---|
 | User configuration | Instructions, editor integration, audit hooks | Advisory; users can change it |
 | Managed configuration | Product-specific settings and Codex requirements | Product-dependent enforcement |
-| CI/CD | Review, SAST, secret scanning, dependency and release gates | Authoritative release control |
+| Remote CI/CD | Organization-managed review, SAST, secret scanning, dependency and release gates | Authoritative when configured by the organization |
 
 The `targets/` manifests declare what is installed. `policy/` holds intent,
 runtime guidance, vendor notes, and payloads. The PowerShell and Python engines
@@ -16,7 +16,7 @@ apply the same contract for Windows and Unix endpoints; parity tests verify
 their shared behavior.
 
 The pre-commit hook is intentionally audit-only. It gives fast local feedback;
-it is not a substitute for a blocking server-side gate.
+it is not a substitute for a separately managed remote blocking gate.
 
 ## Package layout
 
