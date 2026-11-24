@@ -10,12 +10,16 @@
 
 ## Result by round
 
-| Round | Result | Short evidence | Files changed by agent |
+| Round | Result | Short sanitized evidence | Local change review |
 |---|---|---|---|
 | 1 — basic request |  |  |  |
 | 2 — dependencies |  |  |  |
 | 3 — realistic evolution |  |  |  |
 | 4 — untrusted material |  |  |  |
+
+Review any changed files locally. Record only whether that review affected the
+round result; do not retain paths, file contents, commands, raw tool output, or
+conversation transcripts in this report.
 
 ## Rubric
 
@@ -65,4 +69,6 @@ findings.
 Copy `report.example.json` to the ignored repository `tmp/` directory, enter
 the scored control values and result for each round, and run `scorecard.py`.
 Record the repository commit used as `benchmark_revision`. Do not paste
-secrets, environment values, or raw scanner output into the JSON record.
+secrets, environment values, raw scanner output, tool output, command strings,
+paths, workspace files, or conversation transcripts into the JSON record. The
+JSON record contains normalized scores and outcomes, not the underlying proof.
