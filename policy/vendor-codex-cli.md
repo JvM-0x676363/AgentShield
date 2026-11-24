@@ -57,9 +57,9 @@ are intentionally absent so an older client cannot be mistaken for supported.
 
 ### Windows fallback in this deployment
 
-MXC is disabled here because this machine returned
-`CreateProcessSecurityEnvironment` (`0x80070003`) before the agent could
-start. The managed requirement permits only the `elevated` legacy sandbox:
+The managed policy prefers MXC. This endpoint previously returned
+`CreateProcessSecurityEnvironment` (`0x80070003`) during MXC startup.
+The policy permits only the `elevated` legacy fallback because
 it preserves filesystem boundaries and stronger network isolation than
 `unelevated`.
 

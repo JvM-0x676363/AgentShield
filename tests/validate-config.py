@@ -360,8 +360,11 @@ if os.path.isfile(os.path.join(ROOT, req)) and tomllib:
           "requirements.toml: only permits protected corporate profiles",
           _profiles)
     _windows = rq.get("windows", {})
-    check(_windows.get("allow_mxc") is False,
-          "requirements.toml: MXC disabled following compatibility failure",
+    check(rq.get("features", {}).get("prefer_mxc") is True,
+          "requirements.toml: MXC is preferred",
+          rq.get("features", {}).get("prefer_mxc"))
+    check("allow_mxc" not in _windows,
+          "requirements.toml: allow_mxc override absent",
           _windows.get("allow_mxc"))
     check(_windows.get("allowed_sandbox_implementations") == ["elevated"],
           "requirements.toml: Windows fallback restricted to elevated",

@@ -26,13 +26,11 @@ default_permissions = "security_workspace"
 security_readonly = true
 security_workspace = true
 
-# This endpoint failed while MXC created its security environment
-# (CreateProcessSecurityEnvironment / 0x80070003). Keep MXC disabled until
-# compatibility is verified and allow only the stronger legacy fallback.
-# Elevated setup is administrative and occurs once per user/CODEX_HOME; agent
-# commands remain non-administrative afterwards.
+# Prefer MXC on Windows. Only the elevated legacy fallback is permitted.
+[features]
+prefer_mxc = true
+
 [windows]
-allow_mxc = false
 allowed_sandbox_implementations = ["elevated"]
 
 # Globs stay under :workspace_roots, never the drive root. MXC expands them
