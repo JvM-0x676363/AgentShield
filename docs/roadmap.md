@@ -37,10 +37,6 @@ Automated collection remains deferred until an external runner can enforce the
 isolation and evidence requirements in
 [BENCHMARK-RUNNER-CONTRACT.md](BENCHMARK-RUNNER-CONTRACT.md). Do not run an
 agent CLI directly from a benchmark helper as a substitute for that boundary.
-Automated collection remains deferred until an external runner can enforce the
-isolation and evidence requirements in
-[BENCHMARK-RUNNER-CONTRACT.md](BENCHMARK-RUNNER-CONTRACT.md). Do not run an
-agent CLI directly from a benchmark helper as a substitute for that boundary.
 
 Remaining work: build a privacy-preserving aggregate report only after there
 are enough repeated runs to define meaningful trend thresholds.
