@@ -32,8 +32,8 @@
     "profiles and drops sandbox_mode/allowed_sandbox_modes backward-compatibility",
     "for older clients.",
     "",
-    "On Windows, MXC is explicitly disabled after CreateProcessSecurityEnvironment failures.",
-    "Only the elevated fallback is permitted; it requires one-time administrative provisioning",
+    "On Windows, the managed policy prefers MXC.",
+    "The only permitted legacy fallback is elevated. It requires one-time administrative provisioning",
     "per user/CODEX_HOME, while ordinary Codex usage continues without administrative privileges."
   ],
   "files": [
