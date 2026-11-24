@@ -405,6 +405,8 @@ if os.path.isfile(os.path.join(ROOT, req)) and tomllib:
         _defaults = tomllib.load(fh)
     check("sandbox_mode" not in _defaults,
           "managed defaults: does not select legacy sandbox_mode")
+    check("rules" not in _defaults,
+          "managed defaults: does not use unsupported command rules")
     _codex_user_specs = manifests.get("codex-user", {}).get("files", [])
     _windows_legacy_defaults = [f for f in _codex_user_specs
                                 if f.get("dest", {}).get("windows", "").endswith(

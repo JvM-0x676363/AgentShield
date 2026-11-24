@@ -16,6 +16,8 @@
     "                         a compatible value and the user is notified.",
     "  managed_config.toml -> defaults only. The user can change them during a session;",
     "                         they reapply on the next startup.",
+    "                         It intentionally contains no [rules] section: current",
+    "                         Codex clients accept command rules only in requirements.toml.",
     "",
     "Payload in a separate .toml file, not inline: allows pipeline validation with",
     "tomllib (duplicate keys in TOML are parse errors, and an invalid requirements.toml",
