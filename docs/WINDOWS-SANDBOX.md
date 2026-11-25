@@ -11,6 +11,31 @@ Do not downgrade to `unelevated`, disable sandboxing, or run Codex Desktop
 permanently as administrator to bypass the issue. Those workarounds reduce the
 isolation required by this baseline.
 
+## Windows CLI pilot results (November 2026)
+
+Two endpoints ran Codex CLI 0.172.0 with the managed `security_workspace`
+profile from an ordinary PowerShell session. The test let Codex choose the
+backend. Both runs returned `launcher_mxc=True sandbox_exit=0`: the observer
+saw the MXC launcher as a child of the test process and the command exited
+successfully.
+
+| Endpoint | Observation |
+|---|---|
+| Windows workstation | MXC launched. The earlier startup error `0x80070003` did not recur in this run. |
+| Windows 11 Hyper-V guest | An older checkout installed `allow_mxc = false`. After applying the updated policy and verifying its hash, the same probe observed MXC. |
+
+To repeat the pilot, check that the source policy sets `prefer_mxc = true`
+and permits only `elevated` as a legacy fallback. After applying
+`codex-managed`, compare the SHA-256 hashes of
+`policy/codex-requirements.toml` and `%ProgramData%\OpenAI\Codex\requirements.toml`.
+Run the probe with `codex sandbox --include-managed-config -P security_workspace`
+and observe the child launcher during execution. Record the CLI version,
+launcher observation and exit code. A zero exit code alone leaves the backend
+unconfirmed.
+
+These runs covered CLI startup and command execution. Automatic fallback after
+an MXC startup failure and the Desktop new-thread incident remain unverified.
+
 ## Coverage
 
 | Scenario | Status |
