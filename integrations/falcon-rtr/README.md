@@ -44,9 +44,15 @@ operator workstation; never transfer it to endpoints.
 
 ## Tenant setup
 
-1. Record the SHA-256 printed for `agent-shield.zip` during the build.
-2. Replace `<AGENTSHIELD_PACKAGE_SHA256>` in both apply scripts under
-   `rtr-scripts/`. The scripts reject an unset or mismatched hash.
+1. Verify both downloaded ZIPs against the digests in the selected GitHub release.
+   For a local build, record both SHA-256 values printed by the builder.
+2. Compare the digest assignment in each packaged apply script with the verified
+   `agent-shield.zip` digest. New builds fill in both assignments. Source templates
+   and the published v1.1.0 integrations ZIP contain `<AGENTSHIELD_PACKAGE_SHA256>`.
+   In those copies, edit only the assignment in each script. The original Unix
+   script also uses the placeholder in its validation condition. Leave that
+   condition intact. When upgrading, update the Falcon file and both apply
+   activities together, and check any workflow bindings to activity versions.
 3. Upload the four custom scripts through Falcon's Custom Scripts interface:
    `AgentShield-Apply-Windows`, `AgentShield-Apply-Unix`,
    `AgentShield-Cleanup-Windows`, and `AgentShield-Cleanup-Unix`.

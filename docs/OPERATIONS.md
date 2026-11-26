@@ -103,6 +103,11 @@ phases are `user_configuration`, `security_tools`, and `git_hooks`.
 
 ## Microsoft Intune
 
+For an upgrade, extract the deployment ZIP from the new release into a fresh
+source folder, rebuild the Win32 app and update its detection configuration
+from the same package. Confirm the installed policy matches the new payload
+in the pilot group before expanding assignments.
+
 Build the deployment ZIP from the source checkout, then package its extracted
 contents as the Win32 app. The deployment archive preserves only runtime
 payloads (`targets/`, `policy/`, `lib/`, and `hooks/`) while exposing the
@@ -142,8 +147,9 @@ ZIP, verifies its SHA-256 in a platform custom script, skips deploy when the
 managed layer is already compliant, and records a typed outcome. Build with
 `-IncludeShell` for Unix runtime and `-IncludeFalconTemplates` for the separate
 `agent-shield-integrations.zip` operator asset. Only `agent-shield.zip` belongs
-on endpoints. Upload the custom scripts and schemas, replace activity, group,
-and SHA-256 placeholders, then run Falcon mocks and one approved pilot before
+on endpoints. Verify the apply scripts' expected digest against the deployment
+ZIP, upload the custom scripts and schemas, and configure the activity and group
+IDs. Run Falcon mocks and one approved pilot before
 any broader rollout.
 
 ## Intune

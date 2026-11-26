@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+- Pin the corresponding deployment ZIP digest in both Falcon apply scripts when
+  building an operator archive. Document migration steps for v1.1.0 consumers.
+
+## Changes shipped through v1.1.0 (2026-11-25)
+
+- Prefer MXC for the managed Windows Codex sandbox and permit only the elevated
+  legacy fallback. Two Windows CLI pilots observed MXC and successful execution.
+
 - Removed unsupported Codex command rules from Unix managed defaults. Command
   restrictions remain in `requirements.toml`; ordinary workflows use approval
   or an operator-selected Auto-review session.
