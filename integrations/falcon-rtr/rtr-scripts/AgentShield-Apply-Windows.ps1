@@ -1,5 +1,5 @@
-# Replace this placeholder with the SHA-256 of the reviewed agent-shield.zip
-# before uploading the script to Falcon. Do not leave the placeholder in place.
+# The package builder pins the deployment ZIP digest in this assignment.
+# When using a source template, set it to the verified SHA-256 before upload.
 $ExpectedPackageSha256 = '<AGENTSHIELD_PACKAGE_SHA256>'
 $ErrorActionPreference = 'Stop'
 

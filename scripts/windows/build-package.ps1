@@ -238,7 +238,7 @@ Sec "Packaging"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
 function New-AgentShieldArchive {
-    param([string[]]$PackageFiles, [string]$ArchiveName)
+    param([string[]]$PackageFiles, [string]$ArchiveName, [string]$DeploymentHash)
 
     $staging = Join-Path ([System.IO.Path]::GetTempPath()) "$ArchiveName-$stamp"
     New-Item -ItemType Directory -Force -Path $staging | Out-Null
@@ -250,6 +250,18 @@ function New-AgentShieldArchive {
             $dstDir = Split-Path $dst -Parent
             if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
             Copy-Item $src $dst -Force
+            if ($rel -in @('integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Windows.ps1',
+                           'integrations/falcon-rtr/rtr-scripts/AgentShield-Apply-Unix.sh')) {
+                $scriptText = [IO.File]::ReadAllText($dst)
+                $marker = '<AGENTSHIELD_PACKAGE_SHA256>'
+                if ($DeploymentHash -notmatch '^[a-fA-F0-9]{64}$' -or
+                    $scriptText.IndexOf($marker) -lt 0 -or
+                    $scriptText.IndexOf($marker) -ne $scriptText.LastIndexOf($marker)) {
+                    throw "Cannot pin deployment archive hash in $packageRel"
+                }
+                [IO.File]::WriteAllText($dst, $scriptText.Replace($marker, $DeploymentHash),
+                    [Text.UTF8Encoding]::new($false))
+            }
         }
 
         $manifest = @("# AgentShield -- package $stamp", "")
@@ -284,7 +296,7 @@ Info "  deployment: $($deploymentArchive.Path)"
 Info "  $($deploymentArchive.SizeKb) KB | SHA256 $($deploymentArchive.Hash)"
 
 if ($IntegrationFiles.Count -gt 0) {
-    $integrationArchive = New-AgentShieldArchive -PackageFiles $IntegrationFiles -ArchiveName "$Name-integrations"
+    $integrationArchive = New-AgentShieldArchive -PackageFiles $IntegrationFiles -ArchiveName "$Name-integrations" -DeploymentHash $deploymentArchive.Hash
     Info "  integrations: $($integrationArchive.Path)"
     Info "  $($integrationArchive.SizeKb) KB | SHA256 $($integrationArchive.Hash)"
     Info "  Keep integration assets out of endpoint staging; import or distribute them separately."
@@ -299,7 +311,7 @@ $howto = @'
   1) Upload __NAME__.zip to the Falcon file library.
 
   2) Extract __NAME__-integrations.zip on an operator workstation.
-     Upload the custom scripts, apply schemas, configure the package SHA-256,
+     Upload the custom scripts, apply schemas, verify the embedded package SHA-256,
      replace workflow placeholders, then import the selected workflow.
 
   3) Configure mocks in Falcon Test view. Workflow imports do not include them.

@@ -20,6 +20,14 @@ pipeline template to repositories. Bitbucket YAML does not natively include
 remote files, so avoid runtime cloning of untrusted templates or use of tokens
 embedded in pipeline commands.
 
+## Upgrading a distributed pipeline
+
+Compare your deployed template with `integrations/bitbucket/bitbucket-pipelines.yml`
+from the release tag. The v1.1.0 template removes the Semgrep SAST step present
+in v1.0.4. Preserve any required SAST job, reports and blocking checks in your
+organization's pipeline when adopting other changes. Test the resulting merge
+gates in a pilot repository before distributing the template.
+
 ## Merge enforcement
 
 Pipeline YAML alone does not prevent merging. Configure branch restrictions so

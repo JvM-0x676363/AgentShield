@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Replace this placeholder with the SHA-256 of the reviewed agent-shield.zip
-# before uploading the script to Falcon. Do not leave the placeholder in place.
+# The package builder pins the deployment ZIP digest in this assignment.
+# When using a source template, set it to the verified SHA-256 before upload.
 EXPECTED_PACKAGE_SHA256='<AGENTSHIELD_PACKAGE_SHA256>'
 set -u
 
@@ -59,7 +59,7 @@ cleanup() {
 }
 
 main() {
-    if [[ "$EXPECTED_PACKAGE_SHA256" == '<AGENTSHIELD_PACKAGE_SHA256>' || ! "$EXPECTED_PACKAGE_SHA256" =~ ^[a-fA-F0-9]{64}$ ]]; then ERROR='Expected package SHA-256 is not configured.'; return; fi
+    if [[ ! "$EXPECTED_PACKAGE_SHA256" =~ ^[a-fA-F0-9]{64}$ ]]; then ERROR='Expected package SHA-256 is not configured.'; return; fi
     if [[ ! -f "$ZIP" ]]; then ERROR='AgentShield package was not found in the approved staging directory.'; return; fi
     PACKAGE_SHA256="$(sha256_file "$ZIP")" || { ERROR='No SHA-256 utility is available.'; return; }
     local actual_hash expected_hash
