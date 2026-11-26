@@ -2,10 +2,12 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 1.1.1 - 2026-11-26
 
-- Pin the corresponding deployment ZIP digest in both Falcon apply scripts when
-  building an operator archive. Document migration steps for v1.1.0 consumers.
+- The Windows and Unix Falcon RTR apply scripts in the operator ZIP now contain
+  the SHA-256 of the deployment ZIP built alongside them. The 41 deployment
+  files match v1.1.0. Use the two v1.1.1 archives together.
+- Added upgrade guidance for Falcon RTR, Intune, VS Code GPO and Bitbucket.
 
 ## Changes shipped through v1.1.0 (2026-11-25)
 

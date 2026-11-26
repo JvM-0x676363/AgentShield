@@ -3,6 +3,19 @@
 This roadmap describes planned work. None of these items is an active control
 until it is implemented, tested, and documented as such.
 
+## Platform validation after v1.1.1
+
+| Work item | Next evidence |
+|---|---|
+| macOS smoke test | Run the [macOS procedure](MACOS-SMOKE-TEST.md) on an approved Mac and record the OS, tool versions and check outcomes. |
+| Scanner coverage on Windows, Linux/WSL and macOS | Run the [scanner benchmark](../benchmarks/agent-security/README.md) on each platform. Record findings on the synthetic fixture and distinguish unavailable tools from successful scans. |
+| Windows Desktop thread startup | Verify whether a new thread starts on the previously affected endpoint. Track this separately from the [successful CLI MXC pilots](WINDOWS-SANDBOX.md). |
+| Automatic MXC fallback (deferred) | On an approved test VM, establish whether a failed MXC startup leads to a successful run under the permitted elevated legacy backend. The earlier run with MXC disabled exercised a different starting condition. |
+
+The v1.1.1 release checks verified both Falcon apply scripts against the
+published deployment ZIP digest. Tenant workflow execution remains a
+deployment-specific check. See the [Falcon mock and pilot procedure](../integrations/falcon-rtr/README.md).
+
 ## Approved offline dependencies
 
 Provide a corporate wheelhouse or internal package repository with approved,
@@ -47,9 +60,9 @@ are enough repeated runs to define meaningful trend thresholds.
 
 Claude Mods are optional executable extensions, not a control boundary. The
 initial evaluation and admission criteria are in
-[CLAUDE-MODS.md](CLAUDE-MODS.md). The only candidate currently under
-consideration is a read-only security-posture panel built from the existing
-sanitized scan-state record. No Mod is deployed by AgentShield.
+[CLAUDE-MODS.md](CLAUDE-MODS.md). A read-only security-posture panel is available as a local prototype using
+the existing sanitized scan-state record. Evaluate it in an approved
+non-production profile against the documented admission criteria. No Mod is deployed by AgentShield.
 
 ## Antigravity local commits
 

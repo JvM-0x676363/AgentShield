@@ -31,7 +31,11 @@ transcripts remain available for authorized investigation.
 
 ## Build artifacts
 
-Build both endpoint and operator artifacts from a reviewed checkout:
+For the published v1.1.1 pair, download `agent-shield.zip` and
+`agent-shield-integrations.zip` from the [release page](https://github.com/JvM-0x676363/AgentShield/releases/tag/v1.1.1).
+Verify each archive against its published SHA-256 before importing it.
+
+To build both artifacts from a reviewed checkout:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\build-package.ps1 `
@@ -47,7 +51,7 @@ operator workstation; never transfer it to endpoints.
 1. Verify both downloaded ZIPs against the digests in the selected GitHub release.
    For a local build, record both SHA-256 values printed by the builder.
 2. Compare the digest assignment in each packaged apply script with the verified
-   `agent-shield.zip` digest. New builds fill in both assignments. Source templates
+   `agent-shield.zip` digest. The v1.1.1 operator ZIP includes both assignments. Source templates
    and the published v1.1.0 integrations ZIP contain `<AGENTSHIELD_PACKAGE_SHA256>`.
    In those copies, edit only the assignment in each script. The original Unix
    script also uses the placeholder in its validation condition. Leave that

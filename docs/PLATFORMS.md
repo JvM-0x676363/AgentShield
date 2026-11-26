@@ -2,7 +2,7 @@
 
 | Platform | Installer/deployer | Current status |
 |---|---|---|
-| Windows | PowerShell `scripts/windows/install.ps1` / `scripts/windows/deploy.ps1` | Supported; native Codex sandbox incident may require WSL |
+| Windows | PowerShell `scripts/windows/install.ps1` / `scripts/windows/deploy.ps1` | MXC validated on two CLI endpoints; Desktop thread startup remains open |
 | Linux | `scripts/unix/install.sh` / `scripts/unix/deploy.sh` | Supported |
 | macOS | `scripts/unix/install.sh` / `scripts/unix/deploy.sh` | Payload and automated validation supported; [smoke test pending](MACOS-SMOKE-TEST.md) |
 | Windows with WSL | Independent Windows and WSL sessions | Supported and validated |

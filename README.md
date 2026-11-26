@@ -50,9 +50,11 @@ Clone the source repository or extract a release ZIP, review the policy files,
 then choose the execution model that matches your endpoint. Source commands use
 `scripts/`; the release ZIP puts the runnable entry points at its root.
 
-For v1.1.0 upgrades, download both assets from the [release page](https://github.com/JvM-0x676363/AgentShield/releases/tag/v1.1.0)
-and verify their SHA-256 digests. Use `agent-shield.zip` on endpoints and
-`agent-shield-integrations.zip` on operator workstations for Falcon RTR and VS Code GPO.
+Download `agent-shield.zip` from the [v1.1.1 release](https://github.com/JvM-0x676363/AgentShield/releases/tag/v1.1.1)
+for endpoint installation. Falcon RTR and VS Code GPO operators also need
+`agent-shield-integrations.zip` from the same release. Verify each download
+against its published SHA-256. The packaged Windows and Unix Falcon apply
+scripts expect the exact deployment ZIP from that release.
 Intune packaging uses the endpoint ZIP. Bitbucket templates and the opt-in Claude Mod
 are distributed in the tagged source. See the [operations guide](docs/OPERATIONS.md),
 [Falcon setup](integrations/falcon-rtr/README.md), [GPO guide](integrations/vscode-gpo/README.md)
