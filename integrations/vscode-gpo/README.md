@@ -8,7 +8,7 @@ applied by the deployment scripts.
 
 ## Upgrading from v1.0.4
 
-Use the `vscode-gpo` files in the v1.1.0 operator ZIP. Review the download
+Use the `vscode-gpo` files in the operator ZIP for your selected release. Review the download
 and logon scripts before syncing them to your distribution share. Both lists
 now omit `semgrep.semgrep`. Existing installations remain installed. Keep any
 organization-required extensions in your managed list and test with a pilot user.
